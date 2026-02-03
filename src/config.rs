@@ -61,3 +61,46 @@ impl Config {
             .unwrap_or_else(|| fallback.to_string())
     }
 }
+
+/// Extract a Google resource ID from a URL or return the value as-is if it's already an ID.
+///
+/// Supports:
+/// - Google Drive folders: `https://drive.google.com/drive/folders/ID` or `https://drive.google.com/drive/u/0/folders/ID`
+/// - Google Docs: `https://docs.google.com/document/d/ID/edit`
+/// - Plain IDs (returned unchanged)
+pub fn extract_google_id(url_or_id: &str) -> String {
+    let trimmed = url_or_id.trim();
+
+    // Google Drive folder URL patterns
+    // https://drive.google.com/drive/folders/ID
+    // https://drive.google.com/drive/u/0/folders/ID
+    if trimmed.contains("drive.google.com") && trimmed.contains("/folders/") {
+        if let Some(id_start) = trimmed.rfind("/folders/") {
+            let after_folders = &trimmed[id_start + 9..];
+            // Take everything up to the next / or ? or end
+            let id = after_folders
+                .split(&['/', '?'][..])
+                .next()
+                .unwrap_or(after_folders);
+            if !id.is_empty() {
+                return id.to_string();
+            }
+        }
+    }
+
+    // Google Docs URL pattern
+    // https://docs.google.com/document/d/ID/edit
+    if trimmed.contains("docs.google.com/document/d/") {
+        if let Some(id_start) = trimmed.find("/document/d/") {
+            let after_d = &trimmed[id_start + 12..];
+            // Take everything up to the next /
+            let id = after_d.split('/').next().unwrap_or(after_d);
+            if !id.is_empty() {
+                return id.to_string();
+            }
+        }
+    }
+
+    // Not a recognized URL, return as-is (assumed to be an ID already)
+    trimmed.to_string()
+}

@@ -1,8 +1,7 @@
 use anyhow::{anyhow, Result};
-use chrono::NaiveDate;
+use chrono::{Local, NaiveDate};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
-use inquire::validator::Validation;
 use inquire::Text;
 
 /// Print the CLI banner.
@@ -29,45 +28,27 @@ pub fn ask_title(title: Option<String>) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
-/// Prompt for proposed date or use provided value.
+/// Get the proposed date, prompting if not provided (defaults to today).
 /// Returns the ISO string and parsed NaiveDate.
 pub fn ask_date(date: Option<String>) -> Result<(String, NaiveDate)> {
-    let mut input = date;
-    loop {
-        let value = match input.take() {
-            Some(val) => val,
-            None => Text::new("Proposed Date (ISO 8601 YYYY-MM-DD):")
-                .with_validator(|val: &str| {
-                    if is_iso_date(val) {
-                        Ok(Validation::Valid)
-                    } else {
-                        Ok(Validation::Invalid("Use YYYY-MM-DD".into()))
-                    }
-                })
-                .prompt()?,
-        };
+    let today = Local::now().date_naive();
+    let today_iso = today.format("%Y-%m-%d").to_string();
 
-        if let Ok(date) = NaiveDate::parse_from_str(&value, "%Y-%m-%d") {
-            return Ok((value, date));
-        }
-        println!(
-            "{}",
-            style("Invalid date. Please use a real calendar date (YYYY-MM-DD).").red()
-        );
-    }
-}
+    let input = match date {
+        Some(val) => val,
+        None => Text::new("Proposed Date (YYYY-MM-DD):")
+            .with_default(&today_iso)
+            .prompt()?,
+    };
 
-/// Check if a string matches YYYY-MM-DD format (syntax only, not validity).
-fn is_iso_date(val: &str) -> bool {
-    let bytes = val.as_bytes();
-    if bytes.len() != 10 {
-        return false;
+    if let Ok(parsed) = NaiveDate::parse_from_str(&input, "%Y-%m-%d") {
+        Ok((input, parsed))
+    } else {
+        Err(anyhow!(
+            "Invalid date format '{}'. Please use YYYY-MM-DD.",
+            input
+        ))
     }
-    bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[0..4].iter().all(|b| b.is_ascii_digit())
-        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
-        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
 }
 
 /// Run an async operation with a spinner, showing success/failure on completion.

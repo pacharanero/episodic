@@ -4,7 +4,7 @@ use anyhow::Result;
 use console::style;
 use inquire::Confirm;
 
-use crate::config::Config;
+use crate::config::{extract_google_id, Config};
 use crate::formatting;
 use crate::google::GoogleBackend;
 use crate::ui::{ask_date, ask_title, print_banner, with_spinner};
@@ -37,10 +37,16 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
         style(&folder_name).cyan()
     );
 
-    let planning_folder_id = config.fetch_required("EDH_IN_PLANNING_GDRIVE_FOLDER_ID")?;
-    let template_doc_id = config.fetch_required("EDH_EPISODE_GUIDE_TEMPLATE_GDOC_ID")?;
-    let planned_doc_id = config.fetch_required("START_HERE_EDH_GDOC_ID")?;
+    // Fetch URLs/IDs from config (supports both full URLs and plain IDs)
+    let planning_folder_url = config.fetch_required("EDH_IN_PLANNING_GDRIVE_FOLDER_URL")?;
+    let template_doc_url = config.fetch_required("EDH_EPISODE_GUIDE_TEMPLATE_GDOC_URL")?;
+    let planned_doc_url = config.fetch_required("START_HERE_EDH_GDOC_URL")?;
     let calendar_id = config.fetch_optional("EDH_CALENDAR_ID", "primary");
+
+    // Extract IDs from URLs for API calls
+    let planning_folder_id = extract_google_id(&planning_folder_url);
+    let template_doc_id = extract_google_id(&template_doc_url);
+    let planned_doc_id = extract_google_id(&planned_doc_url);
 
     let backend = GoogleBackend::new().await?;
 
@@ -49,8 +55,8 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
 
     // Step 1: Create Drive folder
     if Confirm::new(&format!(
-        "Create a new folder in Drive ({}) named '{}' ?",
-        planning_folder_id, folder_name
+        "Create a new folder named '{}' in the planning folder?",
+        folder_name
     ))
     .with_default(false)
     .prompt()?
@@ -157,12 +163,17 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
         )
         .await?;
 
-        let planned_doc_url = format!("https://docs.google.com/document/d/{}/edit", planned_doc_id);
-        if open::that(&planned_doc_url).is_err() {
+        // Use the configured URL if it looks like a URL, otherwise construct one
+        let open_url = if planned_doc_url.starts_with("http") {
+            planned_doc_url.clone()
+        } else {
+            format!("https://docs.google.com/document/d/{}/edit", planned_doc_id)
+        };
+        if open::that(&open_url).is_err() {
             println!(
                 "{} {}",
                 style("Open Planned Episodes doc manually:").yellow(),
-                style(&planned_doc_url).yellow()
+                style(&open_url).yellow(),
             );
         }
     } else if folder.is_none()

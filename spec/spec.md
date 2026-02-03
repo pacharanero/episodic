@@ -48,6 +48,9 @@ Configuration values are loaded from `edh-live.env` in the repo root.
 
 ### Preproduction (`edh new`)
 
+This command can be used with arguments for automation, but the primary use case is
+interactive prompting.
+
 - [ ] **PROMPT**: "Episode Title (Title Case):" (required; no automatic Title Case conversion)
 - [ ] **PROMPT**: "Proposed Date (ISO 8601 YYYY-MM-DD):" (required; regex + real-date validation)
 - [ ] **CONVERT**: Convert the date to `YYYY.MM.DD` for folder naming only.
@@ -93,3 +96,8 @@ Copy workflows from Zapier and n8n to here.
 - [ ] Publish the episode with a short synopsis and link, truncated to Bluesky limits.
 - [ ] Publish the episode with a longer synopsis and link, on LinkedIn.
 - [ ] Archive the data for the episode in the Baw Medical Discourse forum. Append new post to Topic https://bawmedical.co.uk/t/everything-digital-health-archive-everythingdigitalhealth/1197
+
+## Documentation
+
+- Any new changes that affect user-visible behavior should be reflected in
+  the README.md and spec.md files.

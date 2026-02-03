@@ -25,17 +25,47 @@ edh new
 
 ### Testing in Development
 
-1. **Set up Google credentials** using Application Default Credentials (ADC):
+1. **Set up Google authentication** using one of the following methods:
+
+   **Option A: Service Account (recommended for automation)**
+
+   Place your service account JSON file in the `.secrets/` directory:
 
    ```bash
-   # Option A: Use a service account JSON file
-   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+   mkdir -p .secrets
+   cp /path/to/service-account.json .secrets/
+   ```
 
-   # Option B: Use your own Google account (requires gcloud CLI)
+   The CLI will automatically use any `.json` file found in `.secrets/`.
+
+   Alternatively, set the path explicitly:
+
+   ```bash
+   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+   ```
+
+   **Option B: gcloud CLI (for development)**
+
+   Requires [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) to be installed.
+
+   ```bash
    gcloud auth application-default login
    ```
 
-   The service account (or user) needs access to:
+   **Option C: Interactive OAuth (for personal use)**
+
+   If no service account or gcloud credentials are found, the CLI will automatically
+   start an interactive browser-based OAuth flow. To use this:
+   1. Create OAuth 2.0 credentials in [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+      - Choose "Desktop app" as the application type
+   2. Download the JSON file and save it as one of:
+      - `./client_secret.json` (in the project directory)
+      - `./edh-client-secret.json`
+      - `~/.edh/client_secret.json`
+   3. Run `edh new` — a browser window will open for authorization
+   4. Tokens are cached at `~/.edh/token_cache.json` so you only authorize once
+
+   The account needs access to:
    - Google Drive (create folders, copy files)
    - Google Docs (read/write document content)
    - Google Calendar (create events)
@@ -65,6 +95,6 @@ edh new
 
 ### Notes
 
-- The Rust CLI includes the interactive flow and formatting, and implements
-  Google Drive/Docs/Calendar operations using Application Default Credentials.
+- The Rust CLI supports multiple authentication methods: service account, gcloud ADC,
+  or interactive browser-based OAuth.
 - Configuration is loaded from `edh-live.env` in the repository root.
