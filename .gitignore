@@ -21,7 +21,7 @@ target
 #.idea/
 
 # Ignore dotenv environment variable files
-.env
+*.env
 
 # Ignore secrets
 .secrets/

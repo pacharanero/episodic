@@ -104,3 +104,52 @@ pub fn extract_google_id(url_or_id: &str) -> String {
     // Not a recognized URL, return as-is (assumed to be an ID already)
     trimmed.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_google_id_drive_folder() {
+        assert_eq!(
+            extract_google_id(
+                "https://drive.google.com/drive/folders/1PT6uejyWSBCRxm7WkYfw7ZoviL0CdL_k"
+            ),
+            "1PT6uejyWSBCRxm7WkYfw7ZoviL0CdL_k"
+        );
+    }
+
+    #[test]
+    fn test_extract_google_id_drive_folder_with_user() {
+        assert_eq!(
+            extract_google_id(
+                "https://drive.google.com/drive/u/0/folders/1PT6uejyWSBCRxm7WkYfw7ZoviL0CdL_k"
+            ),
+            "1PT6uejyWSBCRxm7WkYfw7ZoviL0CdL_k"
+        );
+    }
+
+    #[test]
+    fn test_extract_google_id_docs() {
+        assert_eq!(
+            extract_google_id("https://docs.google.com/document/d/1PS-WIo7WhZt41Ss7kIP6Wd8HOoAWv-KTIzI3Yhp2GpE/edit"),
+            "1PS-WIo7WhZt41Ss7kIP6Wd8HOoAWv-KTIzI3Yhp2GpE"
+        );
+    }
+
+    #[test]
+    fn test_extract_google_id_plain_id() {
+        assert_eq!(
+            extract_google_id("1PT6uejyWSBCRxm7WkYfw7ZoviL0CdL_k"),
+            "1PT6uejyWSBCRxm7WkYfw7ZoviL0CdL_k"
+        );
+    }
+
+    #[test]
+    fn test_extract_google_id_with_query_params() {
+        assert_eq!(
+            extract_google_id("https://drive.google.com/drive/folders/1PT6uejy?usp=sharing"),
+            "1PT6uejy"
+        );
+    }
+}

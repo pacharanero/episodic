@@ -70,12 +70,14 @@ edh new
    - Google Docs (read/write document content)
    - Google Calendar (create events)
 
-2. **Configure environment variables** by copying the template and filling in your IDs:
+2. **Configure environment variables** by copying the template and filling in your URLs:
 
    ```bash
    cp edh-template.env edh-live.env
-   # Edit edh-live.env with your Google Doc/Folder/Calendar IDs
+   # Edit edh-live.env with your Google Doc/Folder URLs
    ```
+
+   You can paste URLs directly from your browser — the CLI extracts the resource ID automatically.
 
 3. **Run the CLI**:
 
