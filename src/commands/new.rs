@@ -58,7 +58,7 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
         "Create a new folder named '{}' in the planning folder?",
         folder_name
     ))
-    .with_default(false)
+    .with_default(true)
     .prompt()?
     {
         folder = with_spinner(
@@ -78,7 +78,7 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
     // Step 2: Copy Episode Guide template
     if let Some(folder_val) = folder.as_ref() {
         if Confirm::new("Copy the Episode Guide template into that folder?")
-            .with_default(false)
+            .with_default(true)
             .prompt()?
         {
             doc = with_spinner(
@@ -106,7 +106,7 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
     // Step 3: Update Episode Guide document
     if let (Some(doc_val), Some(folder_val)) = (doc.as_ref(), folder.as_ref()) {
         if Confirm::new("Make Episode Guide document changes?")
-            .with_default(false)
+            .with_default(true)
             .prompt()?
         {
             with_spinner(
@@ -129,7 +129,7 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
 
     // Step 4: Create Calendar event
     if Confirm::new("Add an all-day event to Google Calendar with the episode title/date?")
-        .with_default(false)
+        .with_default(true)
         .prompt()?
     {
         let event_link = with_spinner(
@@ -149,7 +149,7 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
     // Step 5: Append to Planned Episodes doc
     if folder.is_some()
         && Confirm::new("Append the episode to the Planned Episodes doc?")
-            .with_default(false)
+            .with_default(true)
             .prompt()?
     {
         with_spinner(
@@ -178,7 +178,7 @@ pub async fn new_episode(title: Option<String>, date: Option<String>) -> Result<
         }
     } else if folder.is_none()
         && Confirm::new("Append the episode to the Planned Episodes doc?")
-            .with_default(false)
+            .with_default(true)
             .prompt()?
     {
         println!(

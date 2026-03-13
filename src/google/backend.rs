@@ -4,22 +4,17 @@ use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
-use yup_oauth2::authenticator::ApplicationDefaultCredentialsTypes;
-use yup_oauth2::{
-    ApplicationDefaultCredentialsAuthenticator, ApplicationDefaultCredentialsFlowOpts,
-    InstalledFlowAuthenticator, InstalledFlowReturnMethod,
-};
+use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 
 use super::types::*;
 
 const SCOPES: &[&str] = &[
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.metadata",
+    "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/calendar",
 ];
 
-/// Google API backend supporting ADC or interactive user OAuth.
+/// Google API backend using OAuth2 authentication.
 #[derive(Clone)]
 pub struct GoogleBackend {
     http: reqwest::Client,
@@ -27,80 +22,8 @@ pub struct GoogleBackend {
 }
 
 impl GoogleBackend {
-    /// Create a new backend, trying ADC first then falling back to user OAuth.
+    /// Create a new backend using OAuth2 authentication.
     pub async fn new() -> Result<Self> {
-        // Set up credentials from .secrets/ if not already configured
-        Self::setup_credentials_from_secrets();
-
-        // Try ADC (service account / instance metadata) first
-        if let Ok(backend) = Self::try_adc().await {
-            return Ok(backend);
-        }
-
-        // Fall back to interactive user OAuth flow
-        Self::try_user_oauth().await
-    }
-
-    /// Look for service account JSON files in .secrets/ directory and set
-    /// GOOGLE_APPLICATION_CREDENTIALS if not already set.
-    fn setup_credentials_from_secrets() {
-        // Skip if already configured
-        if std::env::var("GOOGLE_APPLICATION_CREDENTIALS").is_ok() {
-            return;
-        }
-
-        let secrets_dir = PathBuf::from(".secrets");
-        if !secrets_dir.is_dir() {
-            return;
-        }
-
-        // Find any .json file in .secrets/
-        if let Ok(entries) = std::fs::read_dir(&secrets_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "json") && path.is_file() {
-                    if let Some(path_str) = path.to_str() {
-                        std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", path_str);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    /// Try Application Default Credentials (service account or instance metadata).
-    async fn try_adc() -> Result<Self> {
-        let opts = ApplicationDefaultCredentialsFlowOpts::default();
-        let auth_builder = ApplicationDefaultCredentialsAuthenticator::builder(opts).await;
-        let auth = match auth_builder {
-            ApplicationDefaultCredentialsTypes::ServiceAccount(builder) => builder
-                .build()
-                .await
-                .context("Failed to build Service Account authenticator")?,
-            ApplicationDefaultCredentialsTypes::InstanceMetadata(builder) => builder
-                .build()
-                .await
-                .context("Failed to build Instance Metadata authenticator")?,
-        };
-
-        let token = auth
-            .token(SCOPES)
-            .await
-            .context("Failed to obtain Google access token via ADC")?;
-
-        let access_token = token
-            .token()
-            .map(|t| t.to_string())
-            .ok_or_else(|| anyhow!("ADC token response did not include an access token"))?;
-
-        Ok(Self {
-            http: reqwest::Client::new(),
-            token: access_token,
-        })
-    }
-
-    /// Interactive user OAuth flow via browser.
-    async fn try_user_oauth() -> Result<Self> {
         let secret_path = Self::find_client_secret()?;
         let secret = yup_oauth2::read_application_secret(&secret_path)
             .await
@@ -118,17 +41,17 @@ impl GoogleBackend {
                 .persist_tokens_to_disk(&token_cache)
                 .build()
                 .await
-                .context("Failed to build user OAuth authenticator")?;
+                .context("Failed to build OAuth authenticator")?;
 
         let token = auth
             .token(SCOPES)
             .await
-            .context("Failed to obtain Google access token via user OAuth")?;
+            .context("Failed to obtain Google access token")?;
 
         let access_token = token
             .token()
             .map(|t| t.to_string())
-            .ok_or_else(|| anyhow!("User OAuth token response did not include an access token"))?;
+            .ok_or_else(|| anyhow!("OAuth token response did not include an access token"))?;
 
         Ok(Self {
             http: reqwest::Client::new(),
@@ -136,19 +59,34 @@ impl GoogleBackend {
         })
     }
 
-    /// Find the client_secret.json file for user OAuth.
+    /// Find the client_secret.json file for OAuth.
     fn find_client_secret() -> Result<PathBuf> {
         // Check common locations in order of preference
-        let candidates = [
+        let mut candidates = vec![
             PathBuf::from("client_secret.json"),
-            PathBuf::from("edh-client-secret.json"),
+            PathBuf::from(".secrets/client_secret.json"),
+        ];
+
+        // Also check for any client_secret*.json in .secrets/
+        if let Ok(entries) = std::fs::read_dir(".secrets") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.contains("client_secret") && name.ends_with(".json") {
+                        candidates.push(path);
+                    }
+                }
+            }
+        }
+
+        candidates.extend([
             dirs::config_dir()
                 .map(|d| d.join("edh").join("client_secret.json"))
                 .unwrap_or_default(),
             dirs::home_dir()
                 .map(|d| d.join(".edh").join("client_secret.json"))
                 .unwrap_or_default(),
-        ];
+        ]);
 
         for path in &candidates {
             if path.exists() {
@@ -160,7 +98,7 @@ impl GoogleBackend {
             "No Google OAuth client secret found. Please download OAuth 2.0 credentials from \
              Google Cloud Console and save as one of:\n  \
              - ./client_secret.json\n  \
-             - ./edh-client-secret.json\n  \
+             - ./.secrets/client_secret.json\n  \
              - ~/.edh/client_secret.json"
         ))
     }
