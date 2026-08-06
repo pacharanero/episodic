@@ -110,7 +110,7 @@ impl EpisodeReport {
 }
 
 pub fn inspect(input: &Path) -> Result<EpisodeReport> {
-    let (episode_path, metadata_path, base) = locate_episode(input)?;
+    let (episode_path, metadata_path, base) = locate(input)?;
     let markdown = fs::read_to_string(&metadata_path).with_context(|| {
         format!(
             "could not read episode metadata {}",
@@ -150,7 +150,9 @@ pub fn inspect(input: &Path) -> Result<EpisodeReport> {
     })
 }
 
-fn locate_episode(input: &Path) -> Result<(PathBuf, PathBuf, String)> {
+/// Resolve an episode directory or metadata path to
+/// `(episode directory, metadata file, base name)`.
+pub fn locate(input: &Path) -> Result<(PathBuf, PathBuf, String)> {
     if input.is_file() {
         let filename = input
             .file_name()

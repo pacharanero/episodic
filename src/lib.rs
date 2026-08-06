@@ -6,6 +6,7 @@
 pub mod channel;
 pub mod cli;
 pub mod commands;
+pub mod document;
 pub mod episode;
 pub mod output;
 pub mod paths;

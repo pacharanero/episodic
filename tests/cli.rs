@@ -129,6 +129,160 @@ fn episode_validation_rejects_truncated_chapters() {
 }
 
 #[test]
+fn setting_fields_changes_only_the_managed_lines() {
+    let fixture = EpisodeFixture::new(false);
+    let before = fixture.metadata();
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--format",
+            "json",
+            "episode",
+            "set",
+            fixture.episode.to_str().unwrap(),
+            "Video ID=dQw4w9WgXcQ",
+            "YouTube URL=https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["applied"], true);
+    assert_eq!(report["changes"].as_array().unwrap().len(), 2);
+
+    let after = fixture.metadata();
+    let differing = before
+        .lines()
+        .zip(after.lines())
+        .filter(|(before, after)| before != after)
+        .count();
+    assert_eq!(before.lines().count(), after.lines().count());
+    assert_eq!(differing, 2);
+    assert!(after.contains("- **Video ID**: dQw4w9WgXcQ"));
+    assert!(after.contains("## Custom Human Context"));
+    assert!(after.contains("This paragraph and heading are not managed fields"));
+    assert!(after.contains("Original human-reviewed Bluesky draft."));
+}
+
+#[test]
+fn a_dry_run_reports_the_plan_and_writes_nothing() {
+    let fixture = EpisodeFixture::new(false);
+    let before = fixture.metadata();
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--dry-run",
+            "episode",
+            "set",
+            fixture.episode.to_str().unwrap(),
+            "Video ID=dQw4w9WgXcQ",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Would update"));
+    assert!(stdout.contains("[To be added] -> dQw4w9WgXcQ"));
+    assert_eq!(fixture.metadata(), before);
+}
+
+#[test]
+fn an_existing_value_is_protected_until_forced() {
+    let fixture = EpisodeFixture::new(false);
+    let before = fixture.metadata();
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "episode",
+            "set",
+            fixture.episode.to_str().unwrap(),
+            "Title=Replaced Without Asking",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("--force")
+    );
+    assert_eq!(fixture.metadata(), before);
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "episode",
+            "set",
+            fixture.episode.to_str().unwrap(),
+            "--force",
+            "Title=Replaced Deliberately",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        fixture
+            .metadata()
+            .contains("- **Title**: Replaced Deliberately")
+    );
+}
+
+#[test]
+fn repeating_an_update_is_a_no_op() {
+    let fixture = EpisodeFixture::new(false);
+    let arguments = [
+        "--format",
+        "json",
+        "episode",
+        "set",
+        fixture.episode.to_str().unwrap(),
+        "Video ID=dQw4w9WgXcQ",
+    ];
+    assert!(
+        cargo_bin_cmd!("eps")
+            .args(arguments)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let after_first = fixture.metadata();
+
+    let output = cargo_bin_cmd!("eps").args(arguments).output().unwrap();
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["applied"], false);
+    assert!(report["changes"].as_array().unwrap().is_empty());
+    assert_eq!(fixture.metadata(), after_first);
+}
+
+#[test]
+fn replacing_a_draft_preserves_the_rest_of_the_document() {
+    let fixture = EpisodeFixture::new(false);
+    let draft = fixture.episode.join("draft.txt");
+    fs::write(&draft, "A new Bluesky draft.\nWith two lines.\n").unwrap();
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "episode",
+            "set-draft",
+            fixture.episode.to_str().unwrap(),
+            "Bluesky",
+            "--from-file",
+            draft.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let after = fixture.metadata();
+    assert!(after.contains("```text\nA new Bluesky draft.\nWith two lines.\n```"));
+    assert!(!after.contains("Original human-reviewed Bluesky draft."));
+    assert!(after.contains("- **Post URL**: [To be added]"));
+    assert!(after.contains("## Custom Human Context"));
+    assert!(after.ends_with("no live remote IDs or media.\n"));
+}
+
+#[test]
 fn completions_generate_for_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         let output = cargo_bin_cmd!("eps")
@@ -204,6 +358,10 @@ impl EpisodeFixture {
             _temp: temp,
             episode,
         }
+    }
+
+    fn metadata(&self) -> String {
+        fs::read_to_string(self.episode.join(format!("{}.episode-data.md", Self::BASE))).unwrap()
     }
 }
 

@@ -5,10 +5,12 @@ use crate::channel;
 use crate::commands;
 use crate::output::OutputFormat;
 use crate::paths::tilde_pathbuf;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 use std::ffi::OsString;
+use std::fs;
+use std::io::{self, Read};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -95,6 +97,47 @@ enum EpisodeCommand {
         #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
         path: PathBuf,
     },
+    /// Set managed metadata fields, preserving all other content.
+    Set(SetArgs),
+    /// Replace a social draft block, preserving all other content.
+    SetDraft(SetDraftArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct SetArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    path: PathBuf,
+
+    /// Field assignments, as 'Label=value'.
+    #[arg(required = true, value_name = "LABEL=VALUE")]
+    assignments: Vec<String>,
+
+    /// Enclosing heading, required when a label appears in several sections.
+    #[arg(long)]
+    section: Option<String>,
+
+    /// Replace a field that already holds a value rather than a placeholder.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Debug, clap::Args)]
+struct SetDraftArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    path: PathBuf,
+
+    /// Social platform section, for example Bluesky.
+    platform: String,
+
+    /// Draft heading within the platform section.
+    #[arg(long, default_value = "Draft")]
+    heading: String,
+
+    /// Read the draft from a file instead of standard input.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    from_file: Option<PathBuf>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -148,6 +191,39 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Episode {
             command: Some(EpisodeCommand::Validate { path }),
         }) => commands::episode::validate(&path, cli.format),
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::Set(args)),
+        }) => commands::episode::set(
+            &args.path,
+            &args.assignments,
+            args.section.as_deref(),
+            args.force,
+            cli.dry_run,
+            cli.format,
+        ),
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::SetDraft(args)),
+        }) => {
+            let text = match &args.from_file {
+                Some(path) => fs::read_to_string(path)
+                    .with_context(|| format!("could not read draft {}", path.display()))?,
+                None => {
+                    let mut text = String::new();
+                    io::stdin()
+                        .read_to_string(&mut text)
+                        .context("could not read draft from standard input")?;
+                    text
+                }
+            };
+            commands::episode::set_draft(
+                &args.path,
+                &args.platform,
+                &args.heading,
+                &text,
+                cli.dry_run,
+                cli.format,
+            )
+        }
     }
 }
 
@@ -166,7 +242,7 @@ fn print_channel_help() -> Result<()> {
 
 fn print_episode_help() -> Result<()> {
     println!(
-        "Inspect and validate episode state\n\nUsage: eps episode <COMMAND>\n\nCommands:\n  inspect   Inspect local episode state without changing it\n  validate  Validate local upload readiness and lifecycle consistency"
+        "Inspect and validate episode state\n\nUsage: eps episode <COMMAND>\n\nCommands:\n  inspect    Inspect local episode state without changing it\n  validate   Validate local upload readiness and lifecycle consistency\n  set        Set managed metadata fields, preserving all other content\n  set-draft  Replace a social draft block, preserving all other content"
     );
     Ok(())
 }
