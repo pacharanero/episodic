@@ -57,7 +57,6 @@ The original documents remain in place while current `edh-*` scripts operate. A 
 | Source in parent workspace | Treatment |
 |---|---|
 | `spec/portable-toolset.md` | Historical shell-tool architecture superseded by `episodic`; do not migrate. |
-| `spec/audio-optimisation.md` | Superseded by the implemented single-mix chain (D8). Its unshipped multi-track/profile design is not being built; retain the document only as background. |
 | `tags/tag-generation-guide.md`, `tags/edh-yt-tag-generation-from-description.md` | Superseded by prompt contracts and validators; retain only useful examples as future fixtures. |
 | `transcription/README.md` | Legacy standalone environment; salvage backend requirements during transcription adapter work. |
 | `edh-gui/spec.md` | Prototype backend is superseded; retain only the filesystem-watch/SSE and workbench UX lessons for the future GUI specification. |

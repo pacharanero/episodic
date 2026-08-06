@@ -44,6 +44,6 @@ Consequences: channel neutrality is defended in the meantime by D2 and D4, not b
 
 ## D7 - Audio port reproduces the current single-mix chain
 
-Decided 2026-08-06. When audio processing moves into `eps`, it reproduces the working single-mix chain exactly. The older unshipped multi-track/profile design is not being built: it never shipped, its comparison evidence is missing, and the local chain already does substantially what the external service did. The external service was only ever used to rescue two episodes.
+Decided 2026-08-06. When audio processing moves into `eps`, it reproduces the working single-mix chain exactly: `highpass -> afftdn -> dynaudnorm -> two-pass loudnorm`, as implemented in the EDH workspace `tools/production/edh-process-audio`. The older unshipped multi-track/profile design is not being built: it never shipped, its comparison evidence is missing, and the local chain already does substantially what the external service did. That service was only ever used to rescue two episodes. Its specification has been deleted so it cannot be mistaken for a plan.
 
 See [architecture.md](architecture.md).
