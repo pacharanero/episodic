@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Build the release binary from any working directory.
+
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+exec cargo build --release "$@"

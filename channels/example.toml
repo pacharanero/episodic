@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# A complete, fictional example exercising every section `eps` understands.
+# Only [channel] is required. Copy the sections a real channel actually needs.
+# Production channel configuration lives in the channel's own workspace, never
+# in this repository.
+
+[channel]
+id = "example-channel"
+name = "Example Channel"
+host = "Example Host"
+timezone = "Europe/London"
+subject = "the subject matter this channel covers"
+voice = "UK English, first-person host voice, professional but direct, no emojis"
+
+[paths]
+# Resolved relative to the workspace root, not to this file.
+episodes = "episodes"
+
+# Provider-neutral model routing. Profiles name a way to reach a model; tasks
+# route a named generation task to a profile. Every task and the default must
+# name a profile defined below.
+[llm]
+default_profile = "main"
+
+[llm.profiles.main]
+provider = "anthropic"
+model = "claude-sonnet-5"
+timeout_seconds = 180
+
+[llm.profiles.local]
+# provider = "cli" shells out to an external command and requires `command`.
+provider = "cli"
+command = "llm"
+model = "ollama-gpt-oss-20b"
+args = ["-m", "{model}", "--no-stream"]
+input = "stdin"
+timeout_seconds = 180
+
+[llm.tasks]
+chapters = "main"
+tags = "local"
+thumbnail-quote = "local"
+youtube-description = "main"
+bluesky-draft = "main"
+mastodon-draft = "main"
+linkedin-draft = "main"
+instagram-caption = "main"
+guest-research = "main"
+
+[storage]
+raw_media_retention_days = 180
+# `<base>` is replaced with the episode base name. The file this resolves to is
+# the exact upload source and is never a retention candidate.
+canonical_uploaded_video = "<base>.processed.mp4"
+
+[transcription]
+backend = "whisper-cli"
+model = "turbo"
+language = "en"
+device = "cpu"
+
+[thumbnail]
+width = 1280
+height = 720
+font_path = "assets/fonts/Example-Regular.ttf"
+point_size = 100
+fill = "black"
+stroke = "white"
+stroke_width = 4
+uppercase = true
+quote_by_default = true
+
+[description]
+contact_email = "suggestions@example.invalid"
+boilerplate = """
+MORE EXAMPLE CHANNEL
+
+Subscribe: https://www.youtube.com/@ExampleChannel
+"""
+
+[hashtags]
+default = ["#ExampleChannel", "#Example"]
+
+[youtube]
+channel_id = "UCexampleexampleexampl"
+handle = "@ExampleChannel"
+subscribe_url = "https://www.youtube.com/@ExampleChannel"
+default_privacy = "unlisted"
+
+[playlists]
+binge_watch_id = "PLexampleexampleexampleexampleexampl"
+audio_only_id = "PLexampleexampleexampleexampleexamp2"
+
+[playlists.topic]
+"Example Topic" = "PLexampleexampleexampleexampleexamp3"
+
+# Pointers to where credentials live. Never the credentials themselves.
+[credentials.youtube]
+client_secret_path = "client_secret.json"
+token_path = "youtube.token.json"
+
+[credentials.mastodon]
+env = "MASTODON_ACCESS_TOKEN"
+
+# Non-secret recording joining details, keyed by tool.
+[recording.vdo_ninja]
+room = "examplechannel"
+guest_url = "https://vdo.ninja/?room=examplechannel&pushed&label&quality=0&audiobitrate=256"
+host_url = "https://vdo.ninja/?room=examplechannel&pushed&label=Host&quality=0&audiobitrate=256"
+director_url = "https://vdo.ninja/?director=examplechannel&showdirector&label"
+
+# Long-term destinations for published episodes, keyed by target name.
+[archive.forum]
+topic_url = "https://forum.example.invalid/t/example-channel-archive/1"
+topic_id = 1

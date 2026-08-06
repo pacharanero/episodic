@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[channel]
+id = "Invalid_Channel"
+name = ""
+timezone = ""
+
+[youtube]
+channel_id = "UCfixturefixturefixtur"
+default_privacy = "surprise"
