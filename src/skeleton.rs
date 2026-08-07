@@ -213,8 +213,11 @@ fn episode_data(
     out.push_str(&format!("- **Video File**: `{base}.mp4`\n"));
     out.push_str(&format!("- **Show Notes**: `{base}.md`\n"));
     out.push_str(&format!(
-        "- **Description (formatted)**: `{base}.youtube-description.txt`\n\n"
+        "- **Description (formatted)**: `{base}.youtube-description.txt`\n"
     ));
+    // The exact file that was uploaded is a publication fact, and the one file
+    // retention must never delete. Publication reconciliation records it here.
+    out.push_str(&format!("- **Uploaded File**: {PLACEHOLDER}\n\n"));
 
     out.push_str("## YouTube\n\n### Video\n\n");
     out.push_str(&format!("- **Video ID**: {PLACEHOLDER}\n"));
@@ -227,6 +230,7 @@ fn episode_data(
         .unwrap_or("unlisted");
     out.push_str(&format!("- **Privacy Status**: [{privacy}/public]\n"));
     out.push_str(&format!("- **Upload Date**: {PLACEHOLDER}\n"));
+    out.push_str(&format!("- **Captions**: {PLACEHOLDER}\n"));
     if let Some(youtube) = &config.youtube {
         for (label, value) in [
             ("Category", &youtube.category),

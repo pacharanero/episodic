@@ -158,13 +158,19 @@ pub struct YoutubeIntegration {
     #[serde(default)]
     pub default_privacy: Option<String>,
     /// Defaults recorded on a new episode, so upload settings are channel
-    /// policy rather than constants inside a script.
+    /// policy rather than constants inside a script. `category` and `license`
+    /// are the human strings written to the episode record; `category_id` and
+    /// `license_id` are what the API expects.
     #[serde(default)]
     pub category: Option<String>,
+    #[serde(default)]
+    pub category_id: Option<u32>,
     #[serde(default)]
     pub language: Option<String>,
     #[serde(default)]
     pub license: Option<String>,
+    #[serde(default)]
+    pub license_id: Option<String>,
 }
 
 /// Non-secret joining details for a recording tool.

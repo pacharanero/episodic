@@ -88,9 +88,12 @@ channel_id = "UCexampleexampleexampl"
 handle = "@ExampleChannel"
 subscribe_url = "https://www.youtube.com/@ExampleChannel"
 default_privacy = "unlisted"
+# Display strings recorded on the episode, and the values the API expects.
 category = "Science & Technology (28)"
+category_id = 28
 language = "en-GB"
 license = "creativeCommon"
+license_id = "creativeCommon"
 
 [playlists]
 binge_watch_id = "PLexampleexampleexampleexampleexampl"
