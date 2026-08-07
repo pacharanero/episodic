@@ -8,5 +8,7 @@ pub mod cli;
 pub mod commands;
 pub mod document;
 pub mod episode;
+pub mod lifecycle;
 pub mod output;
 pub mod paths;
+pub mod skeleton;

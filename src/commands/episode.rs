@@ -1,9 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use crate::channel;
 use crate::document::{Change, Document};
 use crate::episode;
+use crate::lifecycle;
 use crate::output::{self, OutputFormat};
+use crate::skeleton;
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -21,6 +24,47 @@ pub fn validate(path: &Path, format: OutputFormat) -> Result<()> {
         bail!("episode validation failed");
     }
     Ok(())
+}
+
+/// Create a new episode folder in `in-planning`.
+pub fn new(
+    config_path: &Path,
+    date: &str,
+    title: &str,
+    guest: Option<&str>,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let config = channel::load(config_path)?;
+    let episodes_path = config.episodes_path(config_path)?;
+    let mut plan = skeleton::plan(&episodes_path, date, title, guest, &config)?;
+    if !dry_run {
+        skeleton::create(&mut plan)?;
+    }
+    output::write(format, &plan, &plan.as_text())
+}
+
+/// List episodes by lifecycle stage.
+pub fn list(config_path: &Path, stage: Option<&str>, format: OutputFormat) -> Result<()> {
+    let config = channel::load(config_path)?;
+    let episodes_path = config.episodes_path(config_path)?;
+    let list = lifecycle::list(&episodes_path, stage)?;
+    output::write(format, &list, &list.as_text())
+}
+
+/// Move an episode to another lifecycle stage.
+pub fn promote(
+    path: &Path,
+    stage: &str,
+    force: bool,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let mut promotion = lifecycle::plan_promotion(path, stage, force)?;
+    if !dry_run {
+        lifecycle::apply_promotion(&mut promotion)?;
+    }
+    output::write(format, &promotion, &promotion.as_text())
 }
 
 /// The result of a document update, reported identically for a dry run and an

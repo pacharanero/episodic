@@ -364,6 +364,240 @@ fn marking_an_unlisted_playlist_fails_without_changing_anything() {
 }
 
 #[test]
+fn a_new_episode_is_built_from_channel_configuration() {
+    let workspace = Workspace::new();
+    let output = workspace
+        .eps(&[
+            "--format",
+            "json",
+            "episode",
+            "new",
+            "2026-09-15",
+            "Alan Hassey on rural informatics",
+            "--guest",
+            "Dr Alan Hassey",
+        ])
+        .unwrap();
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["applied"], true);
+    assert_eq!(
+        report["base"],
+        "2026.09.15-alan-hassey-on-rural-informatics"
+    );
+
+    let episode = workspace
+        .root
+        .join("episodes/in-planning/2026.09.15-alan-hassey-on-rural-informatics");
+    let data = fs::read_to_string(
+        episode.join("2026.09.15-alan-hassey-on-rural-informatics.episode-data.md"),
+    )
+    .unwrap();
+
+    // Every channel-specific value comes from the config, not from the code.
+    assert!(data.contains("- [ ] Every episode (PLfixturebinge)"));
+    assert!(data.contains("- **Language**: en-GB"));
+    assert!(data.contains("- **Guest**: Dr Alan Hassey"));
+    assert!(data.contains("https://forum.invalid/archive"));
+
+    let notes =
+        fs::read_to_string(episode.join("2026.09.15-alan-hassey-on-rural-informatics.md")).unwrap();
+    assert!(notes.contains("https://example.invalid/guest"));
+    assert!(notes.contains("Fixture Host"));
+
+    // The skeleton is immediately usable by the document commands.
+    for arguments in [
+        vec![
+            "episode",
+            "mark-playlist",
+            episode.to_str().unwrap(),
+            "PLfixturebinge",
+        ],
+        vec![
+            "episode",
+            "set",
+            episode.to_str().unwrap(),
+            "Video ID=abc123",
+        ],
+    ] {
+        workspace.eps(&arguments).unwrap();
+    }
+}
+
+#[test]
+fn creating_the_same_episode_twice_fails_without_touching_it() {
+    let workspace = Workspace::new();
+    workspace
+        .eps(&["episode", "new", "2026-09-15", "Rural informatics"])
+        .unwrap();
+    let episode = workspace
+        .root
+        .join("episodes/in-planning/2026.09.15-rural-informatics");
+    let before = fs::read_to_string(episode.join("2026.09.15-rural-informatics.md")).unwrap();
+
+    let output = workspace.run(&["episode", "new", "2026-09-15", "Rural informatics"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("already exists")
+    );
+    assert_eq!(
+        fs::read_to_string(episode.join("2026.09.15-rural-informatics.md")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn a_failed_new_episode_leaves_no_folder_behind() {
+    let workspace = Workspace::new();
+    let output = workspace.run(&["episode", "new", "2026-13-45", "Impossible date"]);
+    assert!(!output.status.success());
+    assert!(!workspace.root.join("episodes/in-planning").exists());
+}
+
+#[test]
+fn listing_groups_episodes_by_stage_and_finds_year_subdirectories() {
+    let workspace = Workspace::new();
+    for (stage, base) in [
+        ("in-planning", "2026.09.15-planned"),
+        ("in-progress", "2026.08.01-recording"),
+        ("published/2025", "2025.03.02-back-catalogue"),
+        ("published", "not-an-episode-folder"),
+    ] {
+        fs::create_dir_all(workspace.root.join("episodes").join(stage).join(base)).unwrap();
+    }
+
+    let output = workspace
+        .eps(&["--format", "json", "episode", "list"])
+        .unwrap();
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let episodes = report["episodes"].as_array().unwrap();
+    let bases = episodes
+        .iter()
+        .map(|episode| episode["base"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        bases,
+        [
+            "2026.09.15-planned",
+            "2026.08.01-recording",
+            "2025.03.02-back-catalogue"
+        ]
+    );
+    assert_eq!(episodes[2]["date"], "2025-03-02");
+    assert_eq!(episodes[0]["has_metadata"], false);
+
+    let output = workspace
+        .eps(&[
+            "--format",
+            "json",
+            "episode",
+            "list",
+            "--stage",
+            "in-progress",
+        ])
+        .unwrap();
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["episodes"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn promotion_is_guarded_and_reversible_only_with_force() {
+    let workspace = Workspace::new();
+    workspace
+        .eps(&["episode", "new", "2026-09-15", "Rural informatics"])
+        .unwrap();
+    let planned = workspace
+        .root
+        .join("episodes/in-planning/2026.09.15-rural-informatics");
+
+    workspace
+        .eps(&[
+            "episode",
+            "promote",
+            planned.to_str().unwrap(),
+            "in-progress",
+        ])
+        .unwrap();
+    assert!(!planned.exists());
+    let recording = workspace
+        .root
+        .join("episodes/in-progress/2026.09.15-rural-informatics");
+    assert!(
+        recording
+            .join("2026.09.15-rural-informatics.episode-data.md")
+            .is_file()
+    );
+
+    // Publishing an episode that has never been uploaded would misrepresent it.
+    let output = workspace.run(&[
+        "episode",
+        "promote",
+        recording.to_str().unwrap(),
+        "published",
+    ]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("no Video ID recorded")
+    );
+    assert!(recording.exists());
+
+    // Going backwards is possible, but only deliberately.
+    let output = workspace.run(&[
+        "episode",
+        "promote",
+        recording.to_str().unwrap(),
+        "in-planning",
+    ]);
+    assert!(!output.status.success());
+    workspace
+        .eps(&[
+            "episode",
+            "promote",
+            recording.to_str().unwrap(),
+            "in-planning",
+            "--force",
+        ])
+        .unwrap();
+    assert!(planned.exists());
+}
+
+#[test]
+fn a_promotion_dry_run_moves_nothing() {
+    let workspace = Workspace::new();
+    workspace
+        .eps(&["episode", "new", "2026-09-15", "Rural informatics"])
+        .unwrap();
+    let planned = workspace
+        .root
+        .join("episodes/in-planning/2026.09.15-rural-informatics");
+
+    let output = workspace
+        .eps(&[
+            "--dry-run",
+            "episode",
+            "promote",
+            planned.to_str().unwrap(),
+            "in-progress",
+        ])
+        .unwrap();
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("Would promote")
+    );
+    assert!(planned.exists());
+    assert!(
+        !workspace
+            .root
+            .join("episodes/in-progress/2026.09.15-rural-informatics")
+            .exists()
+    );
+}
+
+#[test]
 fn completions_generate_for_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         let output = cargo_bin_cmd!("eps")
@@ -372,6 +606,77 @@ fn completions_generate_for_supported_shells() {
             .unwrap();
         assert!(output.status.success(), "completion failed for {shell}");
         assert!(!output.stdout.is_empty());
+    }
+}
+
+/// A workspace laid out the way a real channel workspace is: a channel config
+/// under `channels/`, with episodes resolved relative to the workspace root.
+struct Workspace {
+    _temp: TempDir,
+    root: PathBuf,
+    config: PathBuf,
+}
+
+impl Workspace {
+    fn new() -> Self {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        fs::create_dir_all(root.join("channels")).unwrap();
+        let config = root.join("channels/fixture-channel.toml");
+        fs::write(
+            &config,
+            r#"
+[channel]
+id = "fixture-channel"
+name = "Fixture Channel"
+host = "Fixture Host"
+timezone = "Europe/London"
+
+[paths]
+episodes = "episodes"
+
+[youtube]
+channel_id = "UCfixturefixturefixtur"
+default_privacy = "unlisted"
+language = "en-GB"
+
+[playlists]
+binge_watch_id = "PLfixturebinge"
+audio_only_id = "PLfixtureaudio"
+
+[recording.vdo_ninja]
+guest_url = "https://example.invalid/guest"
+host_url = "https://example.invalid/host"
+
+[archive.forum]
+topic_url = "https://forum.invalid/archive"
+"#,
+        )
+        .unwrap();
+        Self {
+            _temp: temp,
+            root,
+            config,
+        }
+    }
+
+    fn run(&self, arguments: &[&str]) -> std::process::Output {
+        cargo_bin_cmd!("eps")
+            .arg("--config")
+            .arg(&self.config)
+            .args(arguments)
+            .current_dir(&self.root)
+            .output()
+            .unwrap()
+    }
+
+    fn eps(&self, arguments: &[&str]) -> Result<std::process::Output, String> {
+        let output = self.run(arguments);
+        if output.status.success() {
+            Ok(output)
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).into_owned())
+        }
     }
 }
 

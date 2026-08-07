@@ -6,7 +6,9 @@ The filesystem is the source of truth. Episode state, channel policy, generated 
 
 ## Status
 
-Early. `eps` can validate channel TOML, inspect episode folders, report upload-readiness and lifecycle inconsistencies, and make targeted lossless edits to the episode record. It does not yet process media, generate metadata, or talk to any remote service.
+Early. `eps` can validate channel TOML, create and list episodes, move them between lifecycle stages, inspect them, report upload-readiness and lifecycle inconsistencies, and make targeted lossless edits to the episode record. It does not yet process media, generate metadata, or talk to any remote service.
+
+New episodes are built entirely from channel configuration, so adding a channel is a TOML file rather than a code change.
 
 Edits change only what they are asked to change: no template rebuild, no reordering, no reflowing, and no normalising of whitespace or line endings. A field already holding a real value is never replaced without `--force`, a repeated update is a no-op rather than a rewrite, and every document shape in the real archive round-trips byte-for-byte.
 
@@ -25,6 +27,11 @@ cargo run -- episode set-draft <episode> Bluesky < draft.txt
 cargo run -- episode set-tags <episode> < tags.txt
 cargo run -- episode mark-playlist <episode> PLxxxx --note 'Added 2026-08-07T09:00:00Z'
 cargo run -- episode add-platform <episode> Mastodon
+
+# Lifecycle.
+cargo run -- episode new 2026-09-15 'Rural informatics' --guest 'Dr Alan Hassey'
+cargo run -- episode list --stage in-progress
+cargo run -- --dry-run episode promote <episode> edited
 ```
 
 Use `eps --help`, `eps channel`, or `eps episode` to discover the current surface. Every command supports text, JSON, and YAML output through the global `--format` option.

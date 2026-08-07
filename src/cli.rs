@@ -107,6 +107,43 @@ enum EpisodeCommand {
     MarkPlaylist(MarkPlaylistArgs),
     /// Add a missing social platform section.
     AddPlatform(AddPlatformArgs),
+    /// Create a new episode folder in the planning stage.
+    New(NewArgs),
+    /// List episodes by lifecycle stage.
+    List {
+        /// Show only one lifecycle stage.
+        #[arg(long)]
+        stage: Option<String>,
+    },
+    /// Move an episode to another lifecycle stage.
+    Promote(PromoteArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct NewArgs {
+    /// Episode date, as YYYY-MM-DD.
+    date: String,
+
+    /// Episode title in human form; the folder slug is derived from it.
+    title: String,
+
+    /// Guest name, when the episode has one.
+    #[arg(long)]
+    guest: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+struct PromoteArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    path: PathBuf,
+
+    /// Destination lifecycle stage.
+    stage: String,
+
+    /// Override the lifecycle guards.
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -273,6 +310,30 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Episode {
             command: Some(EpisodeCommand::AddPlatform(args)),
         }) => commands::episode::add_platform(&args.path, &args.platform, cli.dry_run, cli.format),
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::New(args)),
+        }) => {
+            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            commands::episode::new(
+                &path,
+                &args.date,
+                &args.title,
+                args.guest.as_deref(),
+                cli.dry_run,
+                cli.format,
+            )
+        }
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::List { stage }),
+        }) => {
+            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            commands::episode::list(&path, stage.as_deref(), cli.format)
+        }
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::Promote(args)),
+        }) => {
+            commands::episode::promote(&args.path, &args.stage, args.force, cli.dry_run, cli.format)
+        }
     }
 }
 
@@ -306,7 +367,7 @@ fn print_channel_help() -> Result<()> {
 
 fn print_episode_help() -> Result<()> {
     println!(
-        "Inspect and validate episode state\n\nUsage: eps episode <COMMAND>\n\nCommands:\n  inspect        Inspect local episode state without changing it\n  validate       Validate local upload readiness and lifecycle consistency\n  set            Set managed metadata fields, preserving all other content\n  set-draft      Replace a social draft block, preserving all other content\n  set-tags       Replace the generated tag list, preserving all other content\n  mark-playlist  Record that one playlist was successfully added\n  add-platform   Add a missing social platform section"
+        "Inspect and validate episode state\n\nUsage: eps episode <COMMAND>\n\nCommands:\n  inspect        Inspect local episode state without changing it\n  validate       Validate local upload readiness and lifecycle consistency\n  set            Set managed metadata fields, preserving all other content\n  set-draft      Replace a social draft block, preserving all other content\n  set-tags       Replace the generated tag list, preserving all other content\n  mark-playlist  Record that one playlist was successfully added\n  add-platform   Add a missing social platform section\n  new            Create a new episode folder in the planning stage\n  list           List episodes by lifecycle stage\n  promote        Move an episode to another lifecycle stage"
     );
     Ok(())
 }

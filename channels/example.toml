@@ -88,6 +88,9 @@ channel_id = "UCexampleexampleexampl"
 handle = "@ExampleChannel"
 subscribe_url = "https://www.youtube.com/@ExampleChannel"
 default_privacy = "unlisted"
+category = "Science & Technology (28)"
+language = "en-GB"
+license = "creativeCommon"
 
 [playlists]
 binge_watch_id = "PLexampleexampleexampleexampleexampl"

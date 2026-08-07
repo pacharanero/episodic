@@ -37,7 +37,7 @@ pub struct ChannelConfig {
     #[serde(default)]
     pub credentials: BTreeMap<String, CredentialReference>,
     #[serde(default)]
-    pub recording: BTreeMap<String, toml::Value>,
+    pub recording: BTreeMap<String, RecordingProfile>,
     #[serde(default)]
     pub archive: BTreeMap<String, ArchiveTarget>,
 }
@@ -157,6 +157,28 @@ pub struct YoutubeIntegration {
     pub subscribe_url: Option<String>,
     #[serde(default)]
     pub default_privacy: Option<String>,
+    /// Defaults recorded on a new episode, so upload settings are channel
+    /// policy rather than constants inside a script.
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub license: Option<String>,
+}
+
+/// Non-secret joining details for a recording tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordingProfile {
+    #[serde(default)]
+    pub room: Option<String>,
+    #[serde(default)]
+    pub guest_url: Option<String>,
+    #[serde(default)]
+    pub host_url: Option<String>,
+    #[serde(default)]
+    pub director_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -258,6 +280,44 @@ impl ChannelConfig {
             sections,
         }
     }
+}
+
+impl ChannelConfig {
+    /// Resolve the episodes directory against the workspace root.
+    ///
+    /// Relative paths in a config are relative to the workspace, not to the
+    /// config file: a config at `<workspace>/channels/<id>.toml` saying
+    /// `episodes = "episodes"` means `<workspace>/episodes`. A config kept
+    /// outside a `channels` directory is resolved against its own directory.
+    pub fn episodes_path(&self, config_path: &Path) -> Result<PathBuf> {
+        let episodes = self
+            .paths
+            .episodes
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("episodes"));
+        if episodes.is_absolute() {
+            return Ok(episodes);
+        }
+        Ok(workspace_root(config_path)?.join(episodes))
+    }
+}
+
+/// The directory a relative config path is resolved against.
+fn workspace_root(config_path: &Path) -> Result<PathBuf> {
+    let directory = config_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    if directory.file_name().is_some_and(|name| name == "channels")
+        && let Some(parent) = directory.parent()
+    {
+        return Ok(if parent.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            parent.to_path_buf()
+        });
+    }
+    Ok(directory)
 }
 
 pub fn load(path: &Path) -> Result<ChannelConfig> {
@@ -475,6 +535,35 @@ mod tests {
         let result =
             toml::from_str::<ChannelConfig>(&format!("{}\n[typo]\nvalue = 1\n", identity()));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolves_episode_paths_against_the_workspace_not_the_config() {
+        let config: ChannelConfig =
+            toml::from_str(&format!("{}\n[paths]\nepisodes = 'episodes'\n", identity())).unwrap();
+        assert_eq!(
+            config
+                .episodes_path(std::path::Path::new("/work/channels/example.toml"))
+                .unwrap(),
+            std::path::PathBuf::from("/work/episodes")
+        );
+        assert_eq!(
+            config
+                .episodes_path(std::path::Path::new("/elsewhere/example.toml"))
+                .unwrap(),
+            std::path::PathBuf::from("/elsewhere/episodes")
+        );
+    }
+
+    #[test]
+    fn defaults_the_episodes_directory_when_unset() {
+        let config: ChannelConfig = toml::from_str(identity()).unwrap();
+        assert_eq!(
+            config
+                .episodes_path(std::path::Path::new("/work/channels/example.toml"))
+                .unwrap(),
+            std::path::PathBuf::from("/work/episodes")
+        );
     }
 
     #[test]
