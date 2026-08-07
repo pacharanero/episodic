@@ -9,6 +9,8 @@ pub mod commands;
 pub mod document;
 pub mod episode;
 pub mod lifecycle;
+pub mod media;
 pub mod output;
 pub mod paths;
 pub mod skeleton;
+pub mod tool;

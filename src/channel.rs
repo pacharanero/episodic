@@ -23,6 +23,8 @@ pub struct ChannelConfig {
     #[serde(default)]
     pub storage: Option<StoragePolicy>,
     #[serde(default)]
+    pub audio: Option<AudioPolicy>,
+    #[serde(default)]
     pub transcription: Option<TranscriptionPolicy>,
     #[serde(default)]
     pub thumbnail: Option<ThumbnailPolicy>,
@@ -97,6 +99,98 @@ pub struct StoragePolicy {
     pub raw_media_retention_days: Option<u32>,
     /// Template for the file actually uploaded, with `<base>` substituted.
     pub canonical_uploaded_video: Option<String>,
+}
+
+/// The loudness chain applied to an episode's audio.
+///
+/// Defaults are the podcast delivery targets used by YouTube and Spotify.
+/// They are configuration rather than constants so a channel with different
+/// material can retune without touching the code.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioPolicy {
+    /// High-pass cutoff in Hz, removing rumble below speech.
+    #[serde(default = "default_highpass")]
+    pub highpass_hz: u32,
+    /// Noise floor for the FFT denoiser, in dB.
+    #[serde(default = "default_denoise")]
+    pub denoise_floor_db: f64,
+    /// Integrated loudness target, in LUFS.
+    #[serde(default = "default_target_lufs")]
+    pub target_lufs: f64,
+    /// True-peak ceiling, in dBTP.
+    #[serde(default = "default_true_peak")]
+    pub true_peak: f64,
+    /// Loudness range target, in LU. Lower is flatter and more compressed.
+    #[serde(default = "default_loudness_range")]
+    pub loudness_range: f64,
+    #[serde(default = "default_aac_bitrate")]
+    pub aac_bitrate_kbps: u32,
+    #[serde(default = "default_output_rate")]
+    pub output_sample_rate: u32,
+    /// Sample rate of the mono track produced for transcription. Whisper
+    /// expects 16 kHz, so this rarely changes.
+    #[serde(default = "default_transcription_rate")]
+    pub transcription_sample_rate: u32,
+}
+
+fn default_highpass() -> u32 {
+    80
+}
+fn default_denoise() -> f64 {
+    -25.0
+}
+fn default_target_lufs() -> f64 {
+    -16.0
+}
+fn default_true_peak() -> f64 {
+    -1.5
+}
+fn default_loudness_range() -> f64 {
+    7.0
+}
+fn default_aac_bitrate() -> u32 {
+    192
+}
+fn default_output_rate() -> u32 {
+    48_000
+}
+fn default_transcription_rate() -> u32 {
+    16_000
+}
+
+impl Default for AudioPolicy {
+    fn default() -> Self {
+        Self {
+            highpass_hz: default_highpass(),
+            denoise_floor_db: default_denoise(),
+            target_lufs: default_target_lufs(),
+            true_peak: default_true_peak(),
+            loudness_range: default_loudness_range(),
+            aac_bitrate_kbps: default_aac_bitrate(),
+            output_sample_rate: default_output_rate(),
+            transcription_sample_rate: default_transcription_rate(),
+        }
+    }
+}
+
+impl AudioPolicy {
+    /// Everything applied before loudness normalisation. The dynaudnorm
+    /// settings are tuned for speech: half-second frames, a wide gaussian
+    /// window, and a bounded gain so quiet passages do not pump.
+    pub fn preprocess_chain(&self) -> String {
+        format!(
+            "highpass=f={},afftdn=nf={},dynaudnorm=f=500:g=21:p=0.95:m=12",
+            self.highpass_hz, self.denoise_floor_db
+        )
+    }
+
+    pub fn loudnorm_targets(&self) -> String {
+        format!(
+            "loudnorm=I={}:TP={}:LRA={}",
+            self.target_lufs, self.true_peak, self.loudness_range
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,6 +355,7 @@ impl ChannelConfig {
         note(self.paths.episodes.is_some(), "paths");
         note(self.llm.is_some(), "llm");
         note(self.storage.is_some(), "storage");
+        note(self.audio.is_some(), "audio");
         note(self.transcription.is_some(), "transcription");
         note(self.thumbnail.is_some(), "thumbnail");
         note(self.description.is_some(), "description");
@@ -309,7 +404,7 @@ impl ChannelConfig {
 }
 
 /// The directory a relative config path is resolved against.
-fn workspace_root(config_path: &Path) -> Result<PathBuf> {
+pub fn workspace_root(config_path: &Path) -> Result<PathBuf> {
     let directory = config_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -468,6 +563,17 @@ fn config_issues(config: &ChannelConfig) -> Vec<String> {
     {
         issues.push("thumbnail.width and thumbnail.height must be greater than zero".to_owned());
     }
+    if let Some(audio) = &config.audio {
+        if audio.target_lufs > 0.0 {
+            issues.push("audio.target_lufs is a LUFS value and must not be positive".to_owned());
+        }
+        if audio.true_peak > 0.0 {
+            issues.push("audio.true_peak is a dBTP ceiling and must not be positive".to_owned());
+        }
+        if audio.loudness_range <= 0.0 {
+            issues.push("audio.loudness_range must be greater than zero".to_owned());
+        }
+    }
     issues
 }
 
@@ -584,6 +690,7 @@ mod tests {
             config.present_sections(),
             vec![
                 "archive",
+                "audio",
                 "credentials",
                 "description",
                 "hashtags",

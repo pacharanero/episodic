@@ -53,6 +53,11 @@ enum RootCommand {
         #[command(subcommand)]
         command: Option<ChannelCommand>,
     },
+    /// Analyse and process episode audio.
+    Audio {
+        #[command(subcommand)]
+        command: Option<AudioCommand>,
+    },
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
     /// Inspect and validate episode state.
@@ -60,8 +65,52 @@ enum RootCommand {
         #[command(subcommand)]
         command: Option<EpisodeCommand>,
     },
+    /// Produce transcripts and captions.
+    Transcript {
+        #[command(subcommand)]
+        command: Option<TranscriptCommand>,
+    },
     /// Report the installed eps version.
     Version,
+}
+
+#[derive(Debug, Subcommand)]
+enum AudioCommand {
+    /// Measure loudness without changing anything.
+    Analyse {
+        /// Audio or video file.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+        input: PathBuf,
+    },
+    /// Apply the channel's loudness chain, producing the upload master.
+    Process(MediaArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum TranscriptCommand {
+    /// Extract the standardised mono track used for transcription.
+    Extract(MediaArgs),
+    /// Transcribe audio into the srt, vtt, txt, json, and tsv family.
+    Transcribe {
+        /// Audio file to transcribe.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+        input: PathBuf,
+
+        /// Directory for the transcript family. Defaults to the input's.
+        #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::DirPath)]
+        output_dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+struct MediaArgs {
+    /// Audio or video file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    input: PathBuf,
+
+    /// Output path. Defaults to the contract's name beside the input.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -246,7 +295,51 @@ pub fn run() -> Result<()> {
             cli.dry_run,
             Cli::command(),
         ),
-        Some(RootCommand::Channel { command: None }) => print_channel_help(),
+        Some(RootCommand::Audio { command: None }) => print_family_help("audio"),
+        Some(RootCommand::Audio {
+            command: Some(AudioCommand::Analyse { input }),
+        }) => {
+            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            commands::media::analyse(&path, &input, cli.format)
+        }
+        Some(RootCommand::Audio {
+            command: Some(AudioCommand::Process(args)),
+        }) => {
+            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            commands::media::process(
+                &path,
+                &args.input,
+                args.output.as_deref(),
+                cli.dry_run,
+                cli.format,
+            )
+        }
+        Some(RootCommand::Transcript { command: None }) => print_family_help("transcript"),
+        Some(RootCommand::Transcript {
+            command: Some(TranscriptCommand::Extract(args)),
+        }) => {
+            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            commands::media::extract(
+                &path,
+                &args.input,
+                args.output.as_deref(),
+                cli.dry_run,
+                cli.format,
+            )
+        }
+        Some(RootCommand::Transcript {
+            command: Some(TranscriptCommand::Transcribe { input, output_dir }),
+        }) => {
+            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            commands::media::transcribe(
+                &path,
+                &input,
+                output_dir.as_deref(),
+                cli.dry_run,
+                cli.format,
+            )
+        }
+        Some(RootCommand::Channel { command: None }) => print_family_help("channel"),
         Some(RootCommand::Channel {
             command: Some(ChannelCommand::List { directory }),
         }) => commands::channel::list(&directory, cli.format),
@@ -262,7 +355,7 @@ pub fn run() -> Result<()> {
             let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
             commands::channel::validate(&path, cli.format)
         }
-        Some(RootCommand::Episode { command: None }) => print_episode_help(),
+        Some(RootCommand::Episode { command: None }) => print_family_help("episode"),
         Some(RootCommand::Episode {
             command: Some(EpisodeCommand::Inspect { path }),
         }) => commands::episode::inspect(&path, cli.format),
@@ -358,17 +451,19 @@ fn print_root_help() -> Result<()> {
     Ok(())
 }
 
-fn print_channel_help() -> Result<()> {
-    println!(
-        "Inspect and validate channel configuration\n\nUsage: eps channel <COMMAND>\n\nCommands:\n  list      List channel configs in a directory\n  show      Show the resolved channel configuration summary\n  validate  Validate the resolved channel configuration"
-    );
-    Ok(())
-}
-
-fn print_episode_help() -> Result<()> {
-    println!(
-        "Inspect and validate episode state\n\nUsage: eps episode <COMMAND>\n\nCommands:\n  inspect        Inspect local episode state without changing it\n  validate       Validate local upload readiness and lifecycle consistency\n  set            Set managed metadata fields, preserving all other content\n  set-draft      Replace a social draft block, preserving all other content\n  set-tags       Replace the generated tag list, preserving all other content\n  mark-playlist  Record that one playlist was successfully added\n  add-platform   Add a missing social platform section\n  new            Create a new episode folder in the planning stage\n  list           List episodes by lifecycle stage\n  promote        Move an episode to another lifecycle stage"
-    );
+/// Print a command family's help by asking clap, so the listing can never
+/// drift from the commands that actually exist.
+fn print_family_help(family: &str) -> Result<()> {
+    let mut command = Cli::command();
+    let subcommand = command
+        .find_subcommand_mut(family)
+        .expect("every family printing help is a defined subcommand");
+    // Without this the usage line reads "Usage: episode", losing the binary.
+    subcommand
+        .clone()
+        .bin_name(format!("eps {family}"))
+        .print_help()?;
+    println!();
     Ok(())
 }
 

@@ -597,6 +597,193 @@ fn a_promotion_dry_run_moves_nothing() {
     );
 }
 
+/// Write an executable stand-in for an external tool.
+fn fake(directory: &Path, name: &str, script: &str) -> PathBuf {
+    let path = directory.join(name);
+    fs::write(&path, format!("#!/usr/bin/env bash\n{script}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    path
+}
+
+/// ffprobe that accepts anything non-empty, so tests control readability by
+/// controlling file contents.
+const FAKE_FFPROBE: &str = r#"
+for argument in "$@"; do :; done
+target="${!#}"
+if [ "$1" = "-v" ] && [ -n "$EPISODIC_TEST_PROBE_FAILS" ] && [[ "$target" == *staging* ]]; then
+  exit 1
+fi
+case " $* " in
+  *" stream=codec_type "*) echo "$EPISODIC_TEST_STREAMS" ;;
+esac
+[ -s "$target" ] || exit 1
+"#;
+
+#[test]
+fn a_tool_that_exits_successfully_but_writes_rubbish_publishes_nothing() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let input = workspace.root.join("episode.mp4");
+    fs::write(&input, "input media").unwrap();
+
+    // ffmpeg "succeeds" and writes a file that ffprobe then rejects.
+    let ffmpeg = fake(&tools, "ffmpeg", r#"printf 'garbage' > "${!#}"; exit 0"#);
+    let ffprobe = fake(&tools, "ffprobe", FAKE_FFPROBE);
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args(["transcript", "extract", input.to_str().unwrap()])
+        .env("EPISODIC_FFMPEG_BIN", &ffmpeg)
+        .env("EPISODIC_FFPROBE_BIN", &ffprobe)
+        .env("EPISODIC_TEST_PROBE_FAILS", "1")
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unreadable output")
+    );
+    assert!(!workspace.root.join("episode.wav").exists());
+    // The staged file must be cleaned up, not left to be mistaken for work.
+    let leftovers = fs::read_dir(&workspace.root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().contains("staging"))
+        .count();
+    assert_eq!(leftovers, 0);
+}
+
+#[test]
+fn a_failing_tool_leaves_no_artefact_behind() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let input = workspace.root.join("episode.mp4");
+    fs::write(&input, "input media").unwrap();
+
+    let ffmpeg = fake(
+        &tools,
+        "ffmpeg",
+        r#"echo "codec not supported" >&2; exit 1"#,
+    );
+    let ffprobe = fake(&tools, "ffprobe", FAKE_FFPROBE);
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args(["transcript", "extract", input.to_str().unwrap()])
+        .env("EPISODIC_FFMPEG_BIN", &ffmpeg)
+        .env("EPISODIC_FFPROBE_BIN", &ffprobe)
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    // The tool's own diagnostics are the useful part, so they must survive.
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("codec not supported")
+    );
+    assert!(!workspace.root.join("episode.wav").exists());
+}
+
+#[test]
+fn a_partial_transcript_family_is_never_published() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let input = workspace.root.join("episode.wav");
+    fs::write(&input, "audio").unwrap();
+
+    // Whisper writes the srt and txt but dies before the rest.
+    let whisper = fake(
+        &tools,
+        "whisper",
+        r#"
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--output_dir" ]; then out="$2"; fi
+  shift
+done
+printf '1
+00:00:00,000 --> 00:00:01,000
+hello
+' > "$out/episode.srt"
+printf 'hello
+' > "$out/episode.txt"
+exit 0
+"#,
+    );
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args(["transcript", "transcribe", input.to_str().unwrap()])
+        .env("EPISODIC_WHISPER_BIN", &whisper)
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("did not produce a non-empty vtt")
+    );
+    // Nothing at all is published: a truncated SRT would silently become the
+    // input to chapters and captions.
+    for extension in ["srt", "vtt", "txt", "json", "tsv"] {
+        assert!(
+            !workspace.root.join(format!("episode.{extension}")).exists(),
+            "published {extension} from a partial run"
+        );
+    }
+}
+
+#[test]
+fn a_media_dry_run_reports_the_real_command_and_writes_nothing() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let input = workspace.root.join("episode.mp4");
+    fs::write(&input, "input media").unwrap();
+
+    let ffmpeg = fake(&tools, "ffmpeg", "exit 1");
+    let ffprobe = fake(&tools, "ffprobe", FAKE_FFPROBE);
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "--dry-run",
+            "transcript",
+            "extract",
+            input.to_str().unwrap(),
+        ])
+        .env("EPISODIC_FFMPEG_BIN", &ffmpeg)
+        .env("EPISODIC_FFPROBE_BIN", &ffprobe)
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Would write"));
+    assert!(stdout.contains("-ar 16000"));
+    assert!(stdout.contains("pcm_s16le"));
+    assert!(!workspace.root.join("episode.wav").exists());
+}
+
 #[test]
 fn completions_generate_for_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {

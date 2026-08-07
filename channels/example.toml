@@ -55,6 +55,18 @@ raw_media_retention_days = 180
 # the exact upload source and is never a retention candidate.
 canonical_uploaded_video = "<base>.processed.mp4"
 
+# Loudness chain applied to episode audio. Every value has a sensible default,
+# so the whole section may be omitted.
+[audio]
+highpass_hz = 80
+denoise_floor_db = -25
+target_lufs = -16
+true_peak = -1.5
+loudness_range = 7
+aac_bitrate_kbps = 192
+output_sample_rate = 48000
+transcription_sample_rate = 16000
+
 [transcription]
 backend = "whisper-cli"
 model = "turbo"

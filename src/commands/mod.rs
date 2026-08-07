@@ -4,4 +4,5 @@
 pub mod channel;
 pub mod completions;
 pub mod episode;
+pub mod media;
 pub mod version;

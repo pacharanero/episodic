@@ -27,7 +27,14 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
   `eps episode list` groups episodes by stage, recognises the `YYYY.MM.DD-slug` convention, descends into year subdirectories for the back catalogue, and reports which episodes have no metadata file.
 
   `eps episode promote` moves an episode between stages, guarded: publishing without a recorded Video ID, moving backwards through the lifecycle, and leaving `not-for-publishing` all require `--force` and are reported as overridden. A destination that already exists is refused outright, because the same episode in two stage directories is invalid state. `--dry-run` moves nothing.
-- [ ] **R8 - Port deterministic media commands.** Add audio analysis/processing, extraction/transcription orchestration, frame extraction, thumbnail composition, and external-tool validation. Audio reproduces the working single-mix chain exactly (D8): `highpass -> afftdn -> dynaudnorm -> two-pass loudnorm`.
+- [~] **R8 - Port deterministic media commands.** `eps transcript extract` produces the standardised mono track, `eps audio process` applies the channel's two-pass loudness chain, `eps audio analyse` measures without changing anything, and `eps transcript transcribe` produces the srt/vtt/txt/json/tsv family.
+
+  Outputs are staged beside their destination, probed, and only then renamed, so a tool that fails, or that exits successfully having written something unreadable, leaves nothing behind that a later step would treat as finished work. The transcript family is all-or-nothing: a truncated SRT would silently become the input to chapters and captions. Repeat runs are skips, video streams are copied rather than re-encoded, and `--dry-run` prints the real command line.
+
+  The chain is configuration, not constants: `[audio]` carries the high-pass, denoise floor, loudness targets, bitrate, and sample rates, with the podcast defaults built in so the section may be omitted entirely.
+
+  Remaining: frame extraction and thumbnail composition.
+
 - [ ] **R9 - Port generated metadata commands.** Add provider-neutral chapters, tags, descriptions, quotes, and social drafts with condensed transcript inputs, bounded retries, schemas, and validation.
 - [ ] **R10 - Implement YouTube planning, upload, verification, and reconciliation.** Talk to the API through `google-youtube3` (D8) rather than orchestrating `yutu`. Use resumable upload so an interrupted transfer resumes instead of restarting, refresh the existing OAuth token directly, default uploads to unlisted, require `--apply`, and record only verified outcomes. Guest approval is not a machine gate (D5): `--apply` on the public-publish action is the human checkpoint.
 - [ ] **R11 - Implement social planning, posting, and verification.** Keep drafting separate from posting and record confirmed destination URLs.
