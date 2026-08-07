@@ -6,7 +6,7 @@ The filesystem is the source of truth. Episode state, channel policy, generated 
 
 ## Status
 
-Early. `eps` can validate channel TOML, create and list episodes, move them between lifecycle stages, inspect them, report upload-readiness and lifecycle inconsistencies, and make targeted lossless edits to the episode record. It does not yet process media, generate metadata, or talk to any remote service.
+Early, but a real episode can now be produced with it. `eps` creates and lists episodes, moves them between lifecycle stages, processes audio, transcribes, generates chapters, tags, descriptions, quotes and social drafts, extracts frames, composes thumbnails, and makes targeted lossless edits to the episode record. It does not yet talk to any remote service: uploading and publishing are still the responsibility of the channel workspace's own tooling.
 
 New episodes are built entirely from channel configuration, so adding a channel is a TOML file rather than a code change.
 
@@ -27,6 +27,13 @@ cargo run -- episode set-draft <episode> Bluesky < draft.txt
 cargo run -- episode set-tags <episode> < tags.txt
 cargo run -- episode mark-playlist <episode> PLxxxx --note 'Added 2026-08-07T09:00:00Z'
 cargo run -- episode add-platform <episode> Mastodon
+
+# Media and metadata.
+cargo run -- audio process <recording>
+cargo run -- transcript extract <recording> && cargo run -- transcript transcribe <wav>
+cargo run -- metadata chapters <srt> --output <base>.chapters.txt
+cargo run -- thumbnail frames <recording> --count 8
+cargo run -- thumbnail compose <frame> 'Caption text'
 
 # Lifecycle.
 cargo run -- episode new 2026-09-15 'Rural informatics' --guest 'Dr Alan Hassey'

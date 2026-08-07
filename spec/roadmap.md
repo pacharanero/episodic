@@ -27,13 +27,15 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
   `eps episode list` groups episodes by stage, recognises the `YYYY.MM.DD-slug` convention, descends into year subdirectories for the back catalogue, and reports which episodes have no metadata file.
 
   `eps episode promote` moves an episode between stages, guarded: publishing without a recorded Video ID, moving backwards through the lifecycle, and leaving `not-for-publishing` all require `--force` and are reported as overridden. A destination that already exists is refused outright, because the same episode in two stage directories is invalid state. `--dry-run` moves nothing.
-- [~] **R8 - Port deterministic media commands.** `eps transcript extract` produces the standardised mono track, `eps audio process` applies the channel's two-pass loudness chain, `eps audio analyse` measures without changing anything, and `eps transcript transcribe` produces the srt/vtt/txt/json/tsv family.
+- [x] **R8 - Port deterministic media commands.** `eps transcript extract` produces the standardised mono track, `eps audio process` applies the channel's two-pass loudness chain, `eps audio analyse` measures without changing anything, and `eps transcript transcribe` produces the srt/vtt/txt/json/tsv family.
 
   Outputs are staged beside their destination, probed, and only then renamed, so a tool that fails, or that exits successfully having written something unreadable, leaves nothing behind that a later step would treat as finished work. The transcript family is all-or-nothing: a truncated SRT would silently become the input to chapters and captions. Repeat runs are skips, video streams are copied rather than re-encoded, and `--dry-run` prints the real command line.
 
   The chain is configuration, not constants: `[audio]` carries the high-pass, denoise floor, loudness targets, bitrate, and sample rates, with the podcast defaults built in so the section may be omitted entirely.
 
-  Remaining: frame extraction and thumbnail composition.
+  `eps thumbnail frames` extracts evenly spaced interior frames, skipping the first and last twentieth so intro and outro slates are not offered as candidates. Extraction is per-frame idempotent: a frame that already exists is never regenerated, because it may be the one already chosen or hand-cropped.
+
+  `eps thumbnail compose` overlays the caption and emits both the upload PNG and an editable SVG companion referencing the frame by relative path. Both must exist for the pair to count as done, so a half-finished pair is retried rather than mistaken for success. Canvas size, font, point size, fill, stroke, uppercasing, and quoting all come from `[thumbnail]`. Verified pixel-identical to the shell implementation on the same input.
 
 - [~] **R9 - Port generated metadata commands.** `eps metadata chapters|tags|quote|description|social` generate through a provider-neutral adapter, and `eps metadata check` validates an existing artefact without calling a model.
 

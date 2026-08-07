@@ -4,6 +4,7 @@
 use crate::channel::{self, AudioPolicy, TranscriptionPolicy};
 use crate::media::{self, Media};
 use crate::output::{self, OutputFormat};
+use crate::thumbnail;
 use anyhow::Result;
 use std::path::Path;
 
@@ -67,4 +68,26 @@ fn default_transcription() -> TranscriptionPolicy {
         language: Some("en".to_owned()),
         device: Some("cpu".to_owned()),
     }
+}
+
+pub fn frames(input: &Path, count: u32, dry_run: bool, format: OutputFormat) -> Result<()> {
+    let outcome = thumbnail::frames(input, count, dry_run)?;
+    output::write(format, &outcome, &outcome.as_text())
+}
+
+pub fn compose(
+    config_path: &Path,
+    image: &Path,
+    text: &str,
+    out: Option<&Path>,
+    no_quotes: bool,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let config = channel::load(config_path)?;
+    let policy = config.thumbnail.unwrap_or_default();
+    let quote = !no_quotes && policy.quote_by_default.unwrap_or(true);
+    let workspace = channel::workspace_root(config_path)?;
+    let outcome = thumbnail::compose(image, text, out, &policy, &workspace, quote, dry_run)?;
+    output::write(format, &outcome, &outcome.as_text())
 }

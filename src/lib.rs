@@ -14,6 +14,7 @@ pub mod media;
 pub mod output;
 pub mod paths;
 pub mod skeleton;
+pub mod thumbnail;
 pub mod tool;
 pub mod transcript;
 pub mod validate;

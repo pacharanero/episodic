@@ -151,6 +151,59 @@ impl Media {
                 .is_ok()
     }
 
+    /// Container duration in seconds.
+    pub fn duration_seconds(&self, path: &Path) -> Result<f64> {
+        let output = self.ffprobe.run(&[
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            &path.display().to_string(),
+        ])?;
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<f64>()
+            .with_context(|| format!("could not read duration of {}", path.display()))
+    }
+
+    /// The command line a render would run, for dry-run output.
+    pub fn command_line(&self, arguments: &[String], output: &Path) -> String {
+        let mut display = arguments.to_vec();
+        display.push(output.display().to_string());
+        self.ffmpeg.command_line(&display)
+    }
+
+    /// Run ffmpeg into a staged file beside `output`, validate, and move it.
+    pub fn render_to(&self, arguments: &[String], output: &Path) -> Result<()> {
+        let mut arguments = arguments.to_vec();
+        let directory = parent_of(output);
+        let staged = directory.join(format!(
+            ".{}.staging.{}",
+            file_name(output),
+            extension_of(output)
+        ));
+        arguments.push(staged.display().to_string());
+
+        let _ = fs::remove_file(&staged);
+        let result = self.ffmpeg.run(&arguments);
+        if result.is_err() {
+            let _ = fs::remove_file(&staged);
+        }
+        result?;
+        if !staged.metadata().is_ok_and(|meta| meta.len() > 0) {
+            let _ = fs::remove_file(&staged);
+            bail!(
+                "{} exited successfully but produced nothing for {}",
+                self.ffmpeg.name,
+                output.display()
+            );
+        }
+        fs::rename(&staged, output)?;
+        Ok(())
+    }
+
     fn has_video_stream(&self, path: &Path) -> Result<bool> {
         let output = self.ffprobe.run(&[
             "-v",

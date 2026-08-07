@@ -998,6 +998,91 @@ fn an_existing_artefact_can_be_checked_without_a_model() {
 }
 
 #[test]
+fn frame_extraction_never_overwrites_a_frame_already_chosen() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let episode = workspace.root.join("2026.08.07-fixture");
+    fs::create_dir_all(&episode).unwrap();
+    let video = episode.join("2026.08.07-fixture.processed.mp4");
+    fs::write(&video, "video").unwrap();
+
+    let ffmpeg = fake(&tools, "ffmpeg", r#"printf 'frame' > "${!#}"; exit 0"#);
+    let ffprobe = fake(&tools, "ffprobe", "echo 300.0");
+
+    // A frame the human has already replaced with their own crop.
+    let frames = episode.join("2026.08.07-fixture.frames");
+    fs::create_dir_all(&frames).unwrap();
+    fs::write(frames.join("frame-02.jpg"), "the chosen one").unwrap();
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "--format",
+            "json",
+            "thumbnail",
+            "frames",
+            video.to_str().unwrap(),
+            "--count",
+            "3",
+        ])
+        .env("EPISODIC_FFMPEG_BIN", &ffmpeg)
+        .env("EPISODIC_FFPROBE_BIN", &ffprobe)
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["outputs"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        fs::read_to_string(frames.join("frame-02.jpg")).unwrap(),
+        "the chosen one",
+        "an existing frame must never be regenerated"
+    );
+    assert!(frames.join("frame-01.jpg").is_file());
+    assert!(frames.join("frame-03.jpg").is_file());
+}
+
+#[test]
+fn composing_reports_a_missing_font_rather_than_a_broken_thumbnail() {
+    let workspace = Workspace::new();
+    let image = workspace.root.join("frame.jpg");
+    fs::write(&image, "image").unwrap();
+
+    let mut config = fs::read_to_string(&workspace.config).unwrap();
+    config
+        .push_str("\n[thumbnail]\nwidth = 1280\nheight = 720\nfont_path = \"fonts/Missing.ttf\"\n");
+    fs::write(&workspace.config, config).unwrap();
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "thumbnail",
+            "compose",
+            image.to_str().unwrap(),
+            "Some caption text",
+        ])
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("font not found")
+    );
+    assert!(!workspace.root.join("frame.thumbnail.png").exists());
+}
+
+#[test]
 fn completions_generate_for_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         let output = cargo_bin_cmd!("eps")

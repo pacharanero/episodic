@@ -70,6 +70,11 @@ enum RootCommand {
         #[command(subcommand)]
         command: Option<MetadataCommand>,
     },
+    /// Extract frames and compose thumbnails.
+    Thumbnail {
+        #[command(subcommand)]
+        command: Option<ThumbnailCommand>,
+    },
     /// Produce transcripts and captions.
     Transcript {
         #[command(subcommand)]
@@ -160,6 +165,37 @@ struct TranscriptTaskArgs {
     /// Regenerate even if the output already exists.
     #[arg(long)]
     force: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum ThumbnailCommand {
+    /// Extract evenly spaced still frames for selection.
+    Frames {
+        /// Video to take frames from.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+        video: PathBuf,
+
+        /// How many frames to extract.
+        #[arg(long, default_value_t = 8)]
+        count: u32,
+    },
+    /// Overlay caption text on a frame to make the thumbnail.
+    Compose {
+        /// Source image, usually a chosen frame.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+        image: PathBuf,
+
+        /// Caption text.
+        text: String,
+
+        /// PNG output path. Defaults to the episode's thumbnail.
+        #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+        output: Option<PathBuf>,
+
+        /// Do not wrap the caption in double quotes.
+        #[arg(long)]
+        no_quotes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -396,6 +432,30 @@ pub fn run() -> Result<()> {
         }) => {
             let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
             run_metadata(command, &config, cli.dry_run, cli.format)
+        }
+        Some(RootCommand::Thumbnail { command: None }) => print_family_help("thumbnail"),
+        Some(RootCommand::Thumbnail {
+            command: Some(ThumbnailCommand::Frames { video, count }),
+        }) => commands::media::frames(&video, count, cli.dry_run, cli.format),
+        Some(RootCommand::Thumbnail {
+            command:
+                Some(ThumbnailCommand::Compose {
+                    image,
+                    text,
+                    output,
+                    no_quotes,
+                }),
+        }) => {
+            let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            commands::media::compose(
+                &config,
+                &image,
+                &text,
+                output.as_deref(),
+                no_quotes,
+                cli.dry_run,
+                cli.format,
+            )
         }
         Some(RootCommand::Transcript { command: None }) => print_family_help("transcript"),
         Some(RootCommand::Transcript {

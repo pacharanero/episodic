@@ -336,7 +336,9 @@ pub struct TranscriptionPolicy {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThumbnailPolicy {
+    #[serde(default = "default_thumbnail_width")]
     pub width: u32,
+    #[serde(default = "default_thumbnail_height")]
     pub height: u32,
     #[serde(default)]
     pub font_path: Option<PathBuf>,
@@ -352,6 +354,29 @@ pub struct ThumbnailPolicy {
     pub uppercase: Option<bool>,
     #[serde(default)]
     pub quote_by_default: Option<bool>,
+}
+
+fn default_thumbnail_width() -> u32 {
+    1280
+}
+fn default_thumbnail_height() -> u32 {
+    720
+}
+
+impl Default for ThumbnailPolicy {
+    fn default() -> Self {
+        Self {
+            width: default_thumbnail_width(),
+            height: default_thumbnail_height(),
+            font_path: None,
+            point_size: None,
+            fill: None,
+            stroke: None,
+            stroke_width: None,
+            uppercase: None,
+            quote_by_default: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
