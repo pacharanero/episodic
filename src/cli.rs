@@ -131,6 +131,10 @@ enum MetadataCommand {
 
 #[derive(Debug, clap::Args)]
 struct TaskArgs {
+    /// Episode to take title, URL, chapters, and show notes from.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    episode: Option<PathBuf>,
+
     /// Write the result here instead of standard output.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
     output: Option<PathBuf>,
@@ -150,6 +154,10 @@ struct TaskArgs {
 
 #[derive(Debug, clap::Args)]
 struct TranscriptTaskArgs {
+    /// Episode to take title, URL, chapters, and show notes from.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    episode: Option<PathBuf>,
+
     /// Whisper SRT transcript.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
     transcript: PathBuf,
@@ -602,13 +610,14 @@ fn run_metadata(
 ) -> Result<()> {
     use commands::metadata::Request;
 
-    let (task, transcript, output, variables, force) = match &command {
+    let (task, transcript, output, variables, force, episode) = match &command {
         MetadataCommand::Chapters(args) => (
             "chapters",
             Some(args.transcript.clone()),
             args.output.clone(),
             args.variables.clone(),
             args.force,
+            args.episode.clone(),
         ),
         MetadataCommand::Tags(args) => (
             "tags",
@@ -616,6 +625,7 @@ fn run_metadata(
             args.output.clone(),
             args.variables.clone(),
             args.force,
+            args.episode.clone(),
         ),
         MetadataCommand::Quote(args) => (
             "thumbnail-quote",
@@ -623,6 +633,7 @@ fn run_metadata(
             args.output.clone(),
             args.variables.clone(),
             args.force,
+            args.episode.clone(),
         ),
         MetadataCommand::Description(args) => (
             "youtube-description",
@@ -630,6 +641,7 @@ fn run_metadata(
             args.output.clone(),
             args.variables.clone(),
             args.force,
+            args.episode.clone(),
         ),
         MetadataCommand::Social { task, args } => (
             task.as_str(),
@@ -637,6 +649,7 @@ fn run_metadata(
             args.output.clone(),
             args.variables.clone(),
             args.force,
+            args.episode.clone(),
         ),
         MetadataCommand::Check {
             task,
@@ -651,6 +664,7 @@ fn run_metadata(
         &Request {
             task,
             config_path: config,
+            episode: episode.as_deref(),
             transcript_path: transcript.as_deref(),
             variables: &variables,
             output: output.as_deref(),

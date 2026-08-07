@@ -1083,6 +1083,173 @@ fn composing_reports_a_missing_font_rather_than_a_broken_thumbnail() {
 }
 
 #[test]
+fn a_planned_episode_is_not_failed_for_having_no_recording_yet() {
+    let temp = tempfile::tempdir().unwrap();
+    let episode = temp.path().join("episodes/in-planning/2026.09.15-planned");
+    fs::create_dir_all(&episode).unwrap();
+    fs::write(
+        episode.join("2026.09.15-planned.episode-data.md"),
+        "# Episode Data: Planned\n\n## Episode Details\n\n- **Episode Date**: 2026-09-15\n- **Title**: Planned\n",
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--format",
+            "json",
+            "episode",
+            "validate",
+            episode.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "a planned episode should validate: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["findings"].as_array().unwrap().len(), 0);
+    assert_eq!(report["ready_for_upload"], false);
+    assert_eq!(report["next_action"], "Record the episode");
+}
+
+#[test]
+fn an_episode_in_progress_reports_outstanding_work_without_failing() {
+    let fixture = EpisodeFixture::new(false);
+    for extension in ["tags.txt", "youtube-description.txt"] {
+        fs::remove_file(
+            fixture
+                .episode
+                .join(format!("{}.{extension}", EpisodeFixture::BASE)),
+        )
+        .unwrap();
+    }
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--format",
+            "json",
+            "episode",
+            "validate",
+            fixture.episode.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    // Work still to do is not a failure while an episode is in progress.
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["ready_for_upload"], false);
+    let findings = report["findings"].as_array().unwrap();
+    assert!(findings.iter().all(|f| f["severity"] == "warning"));
+    assert!(findings.iter().any(|f| f["code"] == "missing-tags"));
+}
+
+#[test]
+fn a_published_episode_is_not_judged_on_artefacts_retention_removed() {
+    // After publication, retention deletes the production artefacts. Demanding
+    // them back would report the retention policy working as a fault.
+    let fixture = EpisodeFixture::new(false);
+    let published = fixture
+        .episode
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("published");
+    fs::create_dir_all(&published).unwrap();
+    let moved = published.join(EpisodeFixture::BASE);
+    fs::rename(&fixture.episode, &moved).unwrap();
+
+    for extension in [
+        "processed.mp4",
+        "tags.txt",
+        "youtube-description.txt",
+        "srt",
+        "thumbnail.png",
+    ] {
+        fs::remove_file(moved.join(format!("{}.{extension}", EpisodeFixture::BASE))).unwrap();
+    }
+    let data = moved.join(format!("{}.episode-data.md", EpisodeFixture::BASE));
+    let text = fs::read_to_string(&data)
+        .unwrap()
+        .replace("- **Video ID**: [To be added]", "- **Video ID**: abc123")
+        .replace(
+            "- **Privacy Status**: [unlisted/public]",
+            "- **Privacy Status**: public",
+        );
+    fs::write(&data, text).unwrap();
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--format",
+            "json",
+            "episode",
+            "validate",
+            moved.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "a published episode with cleaned-up artefacts should validate: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["stage"], "published");
+    assert_eq!(report["findings"].as_array().unwrap().len(), 0);
+    assert_eq!(report["next_action"], "Nothing outstanding");
+}
+
+#[test]
+fn a_published_episode_still_recorded_as_unlisted_is_reported() {
+    let fixture = EpisodeFixture::new(false);
+    let published = fixture
+        .episode
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("published");
+    fs::create_dir_all(&published).unwrap();
+    let moved = published.join(EpisodeFixture::BASE);
+    fs::rename(&fixture.episode, &moved).unwrap();
+
+    let data = moved.join(format!("{}.episode-data.md", EpisodeFixture::BASE));
+    let text = fs::read_to_string(&data).unwrap().replace(
+        "- **Privacy Status**: [unlisted/public]",
+        "- **Privacy Status**: unlisted (awaiting guest review)",
+    );
+    fs::write(&data, text).unwrap();
+
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--format",
+            "json",
+            "episode",
+            "inspect",
+            moved.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "published-privacy-mismatch")
+    );
+    assert_eq!(
+        report["next_action"],
+        "Reconcile the recorded privacy status against the destination"
+    );
+}
+
+#[test]
 fn completions_generate_for_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         let output = cargo_bin_cmd!("eps")

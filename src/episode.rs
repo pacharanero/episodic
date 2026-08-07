@@ -125,11 +125,24 @@ pub fn inspect(input: &Path) -> Result<EpisodeReport> {
     };
     let stage = lifecycle_stage(&episode_path);
     let artefacts = artefacts(&episode_path, &base);
-    let mut findings = validate_local_state(&episode_path, &base, &fields, &artefacts);
+    let mut findings = validate_local_state(&episode_path, &base, &fields, &artefacts, &stage);
     validate_lifecycle(&stage, &fields, &mut findings);
-    let ready_for_upload = !findings
-        .iter()
-        .any(|finding| finding.severity == Severity::Error);
+    // Readiness is about the artefacts, not about how loudly their absence is
+    // reported, so it is the same question at every stage.
+    let ready_for_upload = expectation(&stage) != Expectation::Ignore
+        && !findings.iter().any(|finding| {
+            matches!(
+                finding.code,
+                "missing-video"
+                    | "missing-description"
+                    | "missing-tags"
+                    | "description-heading-missing"
+                    | "tags-too-long"
+                    | "chapter-coverage"
+                    | "missing-title"
+                    | "missing-date"
+            )
+        });
     let next_action = next_action(&stage, &fields, ready_for_upload);
 
     Ok(EpisodeReport {
@@ -262,11 +275,38 @@ fn artefacts(episode_path: &Path, base: &str) -> Vec<Artefact> {
     .collect()
 }
 
+/// How strictly an episode's production artefacts are judged at this stage.
+///
+/// An artefact that is missing is only a fault if the stage says it should be
+/// there. A planned episode has not been recorded, so it has no media; a
+/// published episode has had its media removed by retention, so demanding it
+/// back would report the retention policy working as a fault. Between those,
+/// an episode in progress is part-built by definition, and only an edited
+/// episode is claiming to be ready to upload.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Expectation {
+    /// Report nothing about artefacts.
+    Ignore,
+    /// Report what is outstanding, without calling it a failure.
+    Progress,
+    /// Everything required must be present.
+    Complete,
+}
+
+fn expectation(stage: &str) -> Expectation {
+    match stage {
+        "edited" | "unknown" => Expectation::Complete,
+        "in-progress" => Expectation::Progress,
+        _ => Expectation::Ignore,
+    }
+}
+
 fn validate_local_state(
     episode_path: &Path,
     base: &str,
     fields: &EpisodeFields,
     artefacts: &[Artefact],
+    stage: &str,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
     if fields.title.is_none() {
@@ -276,11 +316,18 @@ fn validate_local_state(
         error(&mut findings, "missing-date", "Episode date is missing");
     }
 
+    // Everything below is upload readiness, judged against what this stage
+    // should have produced by now.
+    let expectation = expectation(stage);
+    if expectation == Expectation::Ignore {
+        return findings;
+    }
     let edited = artefact(artefacts, "edited_video").exists;
     let processed = artefact(artefacts, "upload_video").exists;
     if !edited && !processed {
-        error(
+        absent(
             &mut findings,
+            expectation,
             "missing-video",
             "No edited or processed MP4 is present",
         );
@@ -295,8 +342,13 @@ fn validate_local_state(
     validate_description(
         episode_path.join(format!("{base}.youtube-description.txt")),
         &mut findings,
+        expectation,
     );
-    validate_tags(episode_path.join(format!("{base}.tags.txt")), &mut findings);
+    validate_tags(
+        episode_path.join(format!("{base}.tags.txt")),
+        &mut findings,
+        expectation,
+    );
     validate_thumbnail(
         episode_path.join(format!("{base}.thumbnail.png")),
         &mut findings,
@@ -309,10 +361,11 @@ fn validate_local_state(
     findings
 }
 
-fn validate_description(path: PathBuf, findings: &mut Vec<Finding>) {
+fn validate_description(path: PathBuf, findings: &mut Vec<Finding>, expectation: Expectation) {
     let Ok(description) = fs::read_to_string(&path) else {
-        error(
+        absent(
             findings,
+            expectation,
             "missing-description",
             "YouTube description is missing",
         );
@@ -336,9 +389,9 @@ fn validate_description(path: PathBuf, findings: &mut Vec<Finding>) {
     }
 }
 
-fn validate_tags(path: PathBuf, findings: &mut Vec<Finding>) {
+fn validate_tags(path: PathBuf, findings: &mut Vec<Finding>, expectation: Expectation) {
     let Ok(tags) = fs::read_to_string(path) else {
-        error(findings, "missing-tags", "Tag list is missing");
+        absent(findings, expectation, "missing-tags", "Tag list is missing");
         return;
     };
     let tags = tags.trim();
@@ -501,6 +554,25 @@ fn validate_lifecycle(stage: &str, fields: &EpisodeFields, findings: &mut Vec<Fi
 }
 
 fn next_action(stage: &str, fields: &EpisodeFields, ready_for_upload: bool) -> String {
+    let privacy_is = |value: &str| {
+        fields
+            .privacy_status
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .starts_with(value)
+    };
+    match stage {
+        "published" if !privacy_is("public") => {
+            return "Reconcile the recorded privacy status against the destination".to_owned();
+        }
+        "published" => return "Nothing outstanding".to_owned(),
+        "not-for-publishing" => return "Nothing outstanding".to_owned(),
+        // A planned episode has not been recorded, so it is not failing
+        // validation; it is simply waiting for the recording.
+        "in-planning" => return "Record the episode".to_owned(),
+        _ => {}
+    }
     if !ready_for_upload {
         return "Resolve validation errors".to_owned();
     }
@@ -526,6 +598,22 @@ fn artefact<'a>(artefacts: &'a [Artefact], kind: &str) -> &'a Artefact {
         .iter()
         .find(|artefact| artefact.kind == kind)
         .unwrap()
+}
+
+/// Report an artefact that is not there, at the severity its stage warrants.
+/// Content faults in an artefact that does exist are always errors: a wrong
+/// artefact is wrong whenever it was made.
+fn absent(
+    findings: &mut Vec<Finding>,
+    expectation: Expectation,
+    code: &'static str,
+    message: impl Into<String>,
+) {
+    if expectation == Expectation::Complete {
+        error(findings, code, message);
+    } else {
+        warning(findings, code, message);
+    }
 }
 
 fn error(findings: &mut Vec<Finding>, code: &'static str, message: impl Into<String>) {

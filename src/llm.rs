@@ -181,7 +181,8 @@ pub fn render(template: &str, values: &[(String, String)]) -> Result<String> {
             break;
         };
         let name = &after[..end];
-        match values.iter().find(|(key, _)| key == name) {
+        // Last match wins, so a caller's --var overrides configuration.
+        match values.iter().rev().find(|(key, _)| key == name) {
             Some((_, value)) => rendered.push_str(value),
             None => {
                 missing.push(name.to_owned());
@@ -274,6 +275,18 @@ mod tests {
             .to_string();
         assert!(error.contains("missing"));
         assert!(error.contains("transcript"));
+    }
+
+    #[test]
+    fn a_later_value_overrides_an_earlier_one() {
+        let values = vec![
+            ("title".to_owned(), "from config".to_owned()),
+            ("title".to_owned(), "from the command line".to_owned()),
+        ];
+        assert_eq!(
+            render("{{title}}", &values).unwrap(),
+            "from the command line"
+        );
     }
 
     #[test]

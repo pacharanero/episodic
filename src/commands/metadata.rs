@@ -8,6 +8,8 @@
 //! nothing is written until an attempt has passed its task contract.
 
 use crate::channel::{self, MetadataPolicy};
+use crate::document::{self, Document};
+use crate::episode;
 use crate::llm::{self, MAX_ATTEMPTS, Model};
 use crate::output::{self, OutputFormat};
 use crate::transcript;
@@ -73,6 +75,8 @@ fn display_path(path: Option<&Path>) -> String {
 pub struct Request<'a> {
     pub task: &'a str,
     pub config_path: &'a Path,
+    /// Episode to take title, URL, chapters, and show notes from.
+    pub episode: Option<&'a Path>,
     /// Transcript to condense into the prompt, when the task needs one.
     pub transcript_path: Option<&'a Path>,
     /// Extra template variables, as `name=value`.
@@ -109,6 +113,15 @@ pub fn generate(request: &Request, format: OutputFormat) -> Result<()> {
     }
 
     let mut values = llm::config_values(request.config_path)?;
+    for (name, path) in &policy.prompt_files {
+        let path = workspace.join(path);
+        let contents = fs::read_to_string(&path)
+            .with_context(|| format!("prompt file for '{name}' not found: {}", path.display()))?;
+        values.push((name.clone(), strip_comments(&contents)));
+    }
+    if let Some(episode) = request.episode {
+        values.extend(episode_values(episode)?);
+    }
     let mut transcript_end = None;
     if let Some(path) = request.transcript_path {
         let source = fs::read_to_string(path)
@@ -212,6 +225,51 @@ fn attempt_until_valid(
     )
 }
 
+/// Variables a prompt can take straight from the episode, so drafting a post
+/// does not mean retyping the title and URL that are already recorded.
+fn episode_values(path: &Path) -> Result<Vec<(String, String)>> {
+    let (episode_path, metadata_path, base) = episode::locate(path)?;
+    let document = Document::read(&metadata_path)?;
+    let mut values = Vec::new();
+
+    for (label, name) in [
+        ("Title", "title"),
+        ("YouTube URL", "youtube_url"),
+        ("Guest", "guest"),
+        ("Episode Date", "episode_date"),
+        ("Duration", "duration"),
+        ("Video ID", "video_id"),
+    ] {
+        if let Some((_, _, value)) = document
+            .fields()
+            .into_iter()
+            .find(|(_, found, value)| found == label && !document::is_placeholder(value))
+        {
+            values.push((name.to_owned(), value.trim_matches('`').to_owned()));
+        }
+    }
+
+    for (file, name) in [
+        (format!("{base}.chapters.txt"), "chapters"),
+        (format!("{base}.md"), "show_notes"),
+    ] {
+        if let Ok(contents) = fs::read_to_string(episode_path.join(&file)) {
+            values.push((name.to_owned(), contents.trim_end().to_owned()));
+        }
+    }
+    Ok(values)
+}
+
+/// Style-example files carry comments for the human maintaining them; the
+/// model should see only the examples.
+fn strip_comments(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn write_atomically(output: &Path, content: &str) -> Result<()> {
     let directory = output
         .parent()
@@ -284,4 +342,16 @@ pub fn check(
         bail!("{task} validation failed");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_comments;
+
+    #[test]
+    fn shows_the_model_examples_not_the_notes_around_them() {
+        let source =
+            "# Proven lines, newest last\n\nA line that worked\n\n# a note\nAnother line\n";
+        assert_eq!(strip_comments(source), "A line that worked\nAnother line");
+    }
 }

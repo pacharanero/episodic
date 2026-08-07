@@ -148,6 +148,11 @@ pub struct MetadataPolicy {
     /// Per-platform draft limits, keyed by task name.
     #[serde(default)]
     pub social: BTreeMap<String, SocialLimits>,
+    /// Prompt variables whose value is the contents of a workspace file, such
+    /// as a list of previously used lines that calibrates a model's style.
+    /// Comment and blank lines are stripped.
+    #[serde(default)]
+    pub prompt_files: BTreeMap<String, PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -226,6 +231,7 @@ impl Default for MetadataPolicy {
             thumbnail_quote_min_words: default_quote_min_words(),
             thumbnail_quote_max_words: default_quote_max_words(),
             social: BTreeMap::new(),
+            prompt_files: BTreeMap::new(),
         }
     }
 }

@@ -66,6 +66,11 @@ tags_max = 15
 tags_required_final = "example channel"
 description_required_headings = ["CHAPTERS", "LINKS MENTIONED"]
 
+# Prompt variables read from a workspace file, for example proven lines that
+# calibrate a model's style. Comments and blank lines are stripped.
+[metadata.prompt_files]
+history = "assets/thumbnail-quote-history.txt"
+
 [metadata.social.bluesky-draft]
 max_characters = 280
 urls = 0
