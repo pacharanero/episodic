@@ -63,15 +63,31 @@ impl Change {
     }
 }
 
+/// Text output is for reading; the full values are always in the structured
+/// output, so a long value is shortened rather than wrapped across the screen.
 fn display(value: &str) -> String {
-    if value.trim().is_empty() {
-        "(empty)".to_owned()
-    } else {
-        value.to_owned()
+    const LIMIT: usize = 60;
+    let value = value.trim();
+    if value.is_empty() {
+        return "(empty)".to_owned();
     }
+    if value.chars().count() <= LIMIT {
+        return value.to_owned();
+    }
+    let kept = value.chars().take(LIMIT).collect::<String>();
+    format!("{kept}... ({} characters)", value.chars().count())
 }
 
 impl Document {
+    /// Parse an in-memory document. `path` is used only for error messages
+    /// and by [`Document::write`].
+    pub fn parse(path: &Path, source: &str) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            lines: split_lines(source),
+        }
+    }
+
     pub fn read(path: &Path) -> Result<Self> {
         let source = fs::read_to_string(path)
             .with_context(|| format!("could not read episode metadata {}", path.display()))?;
@@ -148,41 +164,11 @@ impl Document {
         text: &str,
     ) -> Result<Option<Change>> {
         let heading_index = self.locate_heading(heading, Some(platform))?;
-        let (open, close) = self.locate_fence(heading_index)?;
-
-        let current = self.lines[open + 1..close]
-            .iter()
-            .map(|line| line.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let replacement = text.trim_end_matches('\n');
-        if current == replacement {
-            return Ok(None);
-        }
-
-        // Reuse the terminator already in use inside the block so a CRLF
-        // document stays CRLF.
-        let terminator = self
-            .lines
-            .get(open + 1)
-            .filter(|line| !line.terminator.is_empty())
-            .map(|line| line.terminator.clone())
-            .unwrap_or_else(|| self.lines[open].terminator.clone());
-        let replacement_lines = replacement
-            .split('\n')
-            .map(|text| Line {
-                text: text.to_owned(),
-                terminator: terminator.clone(),
-            })
-            .collect::<Vec<_>>();
-        self.lines.splice(open + 1..close, replacement_lines);
-
-        Ok(Some(Change {
+        let change = self.replace_fence(heading_index, text.trim_end_matches('\n'))?;
+        Ok(change.map(|change| Change {
             section: Some(platform.to_owned()),
             label: heading.to_owned(),
-            from: current,
-            to: replacement.to_owned(),
-            line: open + 2,
+            ..change
         }))
     }
 
@@ -298,31 +284,355 @@ impl Document {
     /// stack of headings enclosing it. Fenced content is skipped so a draft
     /// containing `- **Post URL**:` is never mistaken for a managed field.
     fn scan(&self) -> impl Iterator<Item = (usize, Vec<String>, &Line)> {
-        let mut headings: Vec<(usize, String)> = Vec::new();
+        self.structure()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, info)| !info.fenced)
+            .map(|(index, info)| (index, info.headings, &self.lines[index]))
+    }
+
+    /// Classify every line once: whether it is fenced, whether it opens a
+    /// heading, and which headings enclose it.
+    fn structure(&self) -> Vec<LineInfo> {
+        let mut stack: Vec<(usize, String)> = Vec::new();
         let mut fence: Option<usize> = None;
         self.lines
             .iter()
-            .enumerate()
-            .filter_map(move |(index, line)| {
-                match (fence, fence_width(&line.text)) {
+            .map(|line| {
+                let fenced = match (fence, fence_width(&line.text)) {
                     (None, Some(width)) => {
                         fence = Some(width);
-                        return None;
+                        true
                     }
                     (Some(open), Some(width)) if width >= open => {
                         fence = None;
-                        return None;
+                        true
                     }
-                    (Some(_), _) => return None,
-                    _ => {}
+                    (Some(_), _) => true,
+                    _ => false,
+                };
+                let heading = (!fenced).then(|| parse_heading(&line.text)).flatten();
+                if let Some((level, title)) = &heading {
+                    stack.retain(|(existing, _)| existing < level);
+                    stack.push((*level, title.clone()));
                 }
-                if let Some((level, title)) = parse_heading(&line.text) {
-                    headings.retain(|(existing, _)| *existing < level);
-                    headings.push((level, title));
+                LineInfo {
+                    fenced,
+                    heading: heading.map(|(level, _)| level),
+                    headings: stack.iter().map(|(_, title)| title.clone()).collect(),
                 }
-                let stack = headings.iter().map(|(_, title)| title.clone()).collect();
-                Some((index, stack, line))
             })
+            .collect()
+    }
+
+    /// The first heading matching any of `titles`, and the body lines beneath
+    /// it up to the next heading of the same or higher level.
+    fn locate_section(
+        &self,
+        titles: &[&str],
+        info: &[LineInfo],
+    ) -> Result<(usize, std::ops::Range<usize>)> {
+        let heading = info
+            .iter()
+            .enumerate()
+            .find(|(index, line)| {
+                line.heading.is_some()
+                    && parse_heading(&self.lines[*index].text).is_some_and(|(_, title)| {
+                        titles.iter().any(|want| title.eq_ignore_ascii_case(want))
+                    })
+            })
+            .map(|(index, _)| index)
+            .with_context(|| {
+                format!(
+                    "no '{}' section in {}",
+                    titles.join("' or '"),
+                    self.path.display()
+                )
+            })?;
+
+        let level = info[heading].heading.expect("located line is a heading");
+        let end = (heading + 1..self.lines.len())
+            .find(|index| info[*index].heading.is_some_and(|found| found <= level))
+            .unwrap_or(self.lines.len());
+        Ok((heading, heading + 1..end))
+    }
+
+    /// Tick the checkbox for one playlist and record how it was added.
+    ///
+    /// The search is confined to the playlist section because the same
+    /// checkbox syntax is used by the manual YouTube Studio steps, where a
+    /// stray tick would claim work nobody did. Playlists are matched by ID
+    /// rather than by name: names have been edited over time, IDs have not.
+    pub fn mark_playlist(&mut self, playlist: &str, note: Option<&str>) -> Result<Option<Change>> {
+        let info = self.structure();
+        let (_, body) = self.locate_section(PLAYLIST_HEADINGS, &info)?;
+
+        let index = body
+            .clone()
+            .find(|index| {
+                !info[*index].fenced
+                    && checkbox(&self.lines[*index].text).is_some()
+                    && self.lines[*index].text.contains(playlist)
+            })
+            .with_context(|| {
+                format!(
+                    "no playlist entry mentioning '{playlist}' in {}",
+                    self.path.display()
+                )
+            })?;
+
+        let (ticked, marker) = checkbox(&self.lines[index].text).expect("line is a checkbox");
+        if ticked {
+            return Ok(None);
+        }
+
+        let from = self.lines[index].text.clone();
+        let mut text = from.clone();
+        text.replace_range(marker..marker + 1, "x");
+        if let Some(note) = note.filter(|note| !note.is_empty()) {
+            text.push_str(&format!(" - {note}"));
+        }
+        self.lines[index].text = text.clone();
+
+        Ok(Some(Change {
+            section: Some(PLAYLIST_HEADINGS[0].to_owned()),
+            label: playlist.to_owned(),
+            from,
+            to: text,
+            line: index + 1,
+        }))
+    }
+
+    /// Replace the generated tag list.
+    ///
+    /// Most documents keep tags in a fenced block, a few keep them as bare
+    /// prose, and one carries a derived character count. All three shapes are
+    /// updated in place rather than normalised to one, because normalising
+    /// would rewrite lines this command was not asked to touch.
+    pub fn set_tags(&mut self, tags: &str) -> Result<Vec<Change>> {
+        let info = self.structure();
+        let (heading, body) = self.locate_section(&["Tags Used"], &info)?;
+        let tags = tags.trim();
+
+        let mut changes = Vec::new();
+        let replaced = if body.clone().any(|index| info[index].fenced) {
+            self.replace_fence(heading, tags)?
+        } else {
+            self.replace_prose(&body, tags, heading)
+        };
+        if let Some(change) = replaced {
+            changes.push(Change {
+                section: Some("Tags Used".to_owned()),
+                label: "tags".to_owned(),
+                ..change
+            });
+        }
+
+        // The count is derived, so leaving it stale would be worse than not
+        // having it at all. It is updated only where it already exists.
+        let info = self.structure();
+        let (_, body) = self.locate_section(&["Tags Used"], &info)?;
+        if let Some(index) = body
+            .clone()
+            .find(|index| self.lines[*index].text.starts_with(TAG_COUNT_LABEL))
+        {
+            let from = self.lines[index].text.clone();
+            let tick = if tags.chars().count() <= TAG_LIMIT {
+                " ✓"
+            } else {
+                " ✗"
+            };
+            let to = format!(
+                "{TAG_COUNT_LABEL} {}/{TAG_LIMIT}{tick}",
+                tags.chars().count()
+            );
+            if from != to {
+                self.lines[index].text = to.clone();
+                changes.push(Change {
+                    section: Some("Tags Used".to_owned()),
+                    label: "Tag character count".to_owned(),
+                    from,
+                    to,
+                    line: index + 1,
+                });
+            }
+        }
+        Ok(changes)
+    }
+
+    /// Add a missing social platform section.
+    ///
+    /// The documented insertion point is immediately before the manual
+    /// YouTube Studio steps; documents without that heading get the section
+    /// appended to the end of the publicity section instead. Existing sections
+    /// are never rewritten.
+    pub fn add_platform(&mut self, platform: &str) -> Result<Option<Change>> {
+        let info = self.structure();
+        if info.iter().enumerate().any(|(index, line)| {
+            line.heading.is_some()
+                && parse_heading(&self.lines[index].text)
+                    .is_some_and(|(_, title)| title.eq_ignore_ascii_case(platform))
+        }) {
+            return Ok(None);
+        }
+
+        let (_, publicity) = self.locate_section(&["Social Media & Publicity"], &info)?;
+        let at = info
+            .iter()
+            .enumerate()
+            .find(|(index, line)| {
+                line.heading.is_some()
+                    && parse_heading(&self.lines[*index].text)
+                        .is_some_and(|(_, title)| title.starts_with(MANUAL_STEPS_HEADING))
+            })
+            .map(|(index, _)| index)
+            .unwrap_or(publicity.end);
+
+        let terminator = self
+            .lines
+            .get(at.saturating_sub(1))
+            .filter(|line| !line.terminator.is_empty())
+            .map_or("\n".to_owned(), |line| line.terminator.clone());
+        let block = [
+            format!("### {platform}"),
+            String::new(),
+            "- **Post URL**: [To be added]".to_owned(),
+            "- **Post Date**: [To be added]".to_owned(),
+            String::new(),
+            "#### Draft".to_owned(),
+            String::new(),
+            "```text".to_owned(),
+            "[To be added]".to_owned(),
+            "```".to_owned(),
+            String::new(),
+        ];
+        let to = block.join("\n");
+        self.lines.splice(
+            at..at,
+            block.into_iter().map(|text| Line {
+                text,
+                terminator: terminator.clone(),
+            }),
+        );
+
+        Ok(Some(Change {
+            section: Some("Social Media & Publicity".to_owned()),
+            label: format!("{platform} section"),
+            from: String::new(),
+            to,
+            line: at + 1,
+        }))
+    }
+
+    /// Replace the contents of the first fenced block after `start`.
+    fn replace_fence(&mut self, start: usize, text: &str) -> Result<Option<Change>> {
+        let (open, close) = self.locate_fence(start)?;
+        let current = self.lines[open + 1..close]
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if current == text {
+            return Ok(None);
+        }
+
+        let terminator = self
+            .lines
+            .get(open + 1)
+            .filter(|line| !line.terminator.is_empty())
+            .map_or_else(
+                || self.lines[open].terminator.clone(),
+                |line| line.terminator.clone(),
+            );
+        let replacement = text
+            .split('\n')
+            .map(|text| Line {
+                text: text.to_owned(),
+                terminator: terminator.clone(),
+            })
+            .collect::<Vec<_>>();
+        self.lines.splice(open + 1..close, replacement);
+
+        Ok(Some(Change {
+            section: None,
+            label: "block".to_owned(),
+            from: current,
+            to: text.to_owned(),
+            line: open + 2,
+        }))
+    }
+
+    /// Replace the prose lines of a section, ignoring blank lines and any
+    /// derived metadata line that follows them.
+    fn replace_prose(
+        &mut self,
+        body: &std::ops::Range<usize>,
+        text: &str,
+        heading: usize,
+    ) -> Option<Change> {
+        let content = body
+            .clone()
+            .filter(|index| {
+                let line = self.lines[*index].text.trim();
+                !line.is_empty() && !line.starts_with(TAG_COUNT_LABEL)
+            })
+            .collect::<Vec<_>>();
+        let current = content
+            .iter()
+            .map(|index| self.lines[*index].text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if current == text {
+            return None;
+        }
+
+        let terminator = self.lines[heading].terminator.clone();
+        let line = Line {
+            text: text.to_owned(),
+            terminator,
+        };
+        let at = match content.as_slice() {
+            [] => heading + 1,
+            [first, ..] => *first,
+        };
+        let end = content.last().map_or(at, |last| last + 1);
+        self.lines.splice(at..end, [line]);
+
+        Some(Change {
+            section: None,
+            label: "block".to_owned(),
+            from: current,
+            to: text.to_owned(),
+            line: at + 1,
+        })
+    }
+}
+
+/// Both spellings occur in real documents: the planner writes the first, the
+/// publication tooling has written the second.
+const PLAYLIST_HEADINGS: &[&str] = &["Playlists to Add", "Playlists Added To"];
+const MANUAL_STEPS_HEADING: &str = "Manual YouTube Studio Steps";
+const TAG_COUNT_LABEL: &str = "**Tag character count**:";
+const TAG_LIMIT: usize = 500;
+
+/// Classification of one line, computed in a single pass.
+struct LineInfo {
+    fenced: bool,
+    /// Heading level, when this line opens a heading.
+    heading: Option<usize>,
+    headings: Vec<String>,
+}
+
+/// Whether a checkbox list item is ticked, and the byte offset of the marker
+/// character between the brackets.
+fn checkbox(text: &str) -> Option<(bool, usize)> {
+    let indent = text.len() - text.trim_start().len();
+    let rest = &text[indent..];
+    let marker = rest.strip_prefix("- [")?.chars().next()?;
+    match marker {
+        'x' | 'X' => Some((true, indent + 3)),
+        ' ' => Some((false, indent + 3)),
+        _ => None,
     }
 }
 
@@ -334,6 +644,23 @@ fn within(headings: &[String], section: Option<&str>) -> bool {
         Some(section) => headings
             .iter()
             .any(|heading| heading.eq_ignore_ascii_case(section)),
+    }
+}
+
+impl Document {
+    /// Every managed field outside a fenced block, as
+    /// `(enclosing headings, label, value)`.
+    ///
+    /// Readers use the same scan as writers so the two cannot disagree about
+    /// what counts as a field.
+    pub fn fields(&self) -> Vec<(Vec<String>, String, String)> {
+        self.scan()
+            .filter_map(|(_, headings, line)| {
+                let label = field_label(&line.text)?;
+                let (_, value) = field_value(&line.text)?;
+                Some((headings, label.to_owned(), value.to_owned()))
+            })
+            .collect()
     }
 }
 
@@ -403,10 +730,7 @@ mod tests {
         include_str!("../tests/fixtures/episode-data/canonical.episode-data.md");
 
     fn document(source: &str) -> Document {
-        Document {
-            path: PathBuf::from("fixture.episode-data.md"),
-            lines: split_lines(source),
-        }
+        Document::parse(Path::new("fixture.episode-data.md"), source)
     }
 
     #[test]
@@ -534,6 +858,166 @@ mod tests {
             .unwrap();
         assert_eq!(change.from, "[To be added]");
         assert!(doc.render().contains("- **Video ID**: not a real field"));
+    }
+
+    /// The shape real documents use, which differs from the written contract:
+    /// two spellings of the playlist heading, checkboxes that also appear in
+    /// the manual steps, and tags in a fence.
+    const PUBLICATION: &str = "\
+## YouTube
+
+### Playlists to Add
+- [x] Binge Watch (PLbinge) - Added 2026-03-16T18:35:13Z
+- [ ] Clinical Safety (PLsafety)
+- [ ] Audio-Only Podcast Version - add manually in YouTube Studio
+
+### Tags Used
+
+```
+[Generated by tools/edh-tags]
+```
+
+**Tag character count**: 25/500 ✓
+
+## Social Media & Publicity
+
+### Bluesky
+- **Post URL**: [To be added]
+
+## Manual YouTube Studio Steps (after upload)
+
+- [ ] Verify license is \"Creative Commons - Attribution\"
+- [ ] Upload thumbnail when ready
+
+## Notes
+
+Human notes.
+";
+
+    #[test]
+    fn ticks_only_the_named_playlist() {
+        let mut doc = document(PUBLICATION);
+        let change = doc
+            .mark_playlist("PLsafety", Some("Added 2026-08-07T09:00:00Z"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            change.to,
+            "- [x] Clinical Safety (PLsafety) - Added 2026-08-07T09:00:00Z"
+        );
+
+        let rendered = doc.render();
+        assert!(rendered.contains("- [ ] Verify license"));
+        assert!(rendered.contains("- [ ] Upload thumbnail when ready"));
+        assert!(rendered.contains("- [ ] Audio-Only Podcast Version"));
+        assert!(rendered.contains("- [x] Binge Watch (PLbinge) - Added 2026-03-16T18:35:13Z"));
+    }
+
+    #[test]
+    fn ticking_an_added_playlist_again_changes_nothing() {
+        let mut doc = document(PUBLICATION);
+        assert!(
+            doc.mark_playlist("PLbinge", Some("ignored"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(doc.render(), PUBLICATION);
+    }
+
+    #[test]
+    fn reports_an_unlisted_playlist_rather_than_inventing_an_entry() {
+        let mut doc = document(PUBLICATION);
+        let error = doc
+            .mark_playlist("PLunknown", None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("PLunknown"), "unexpected error: {error}");
+        assert_eq!(doc.render(), PUBLICATION);
+    }
+
+    #[test]
+    fn accepts_the_other_playlist_heading_spelling() {
+        let source = PUBLICATION.replace("### Playlists to Add", "### Playlists Added To");
+        let mut doc = document(&source);
+        assert!(doc.mark_playlist("PLsafety", None).unwrap().is_some());
+    }
+
+    #[test]
+    fn replaces_fenced_tags_and_refreshes_the_derived_count() {
+        let mut doc = document(PUBLICATION);
+        let changes = doc.set_tags("nhs, digital health, informatics").unwrap();
+        assert_eq!(changes.len(), 2);
+
+        let rendered = doc.render();
+        assert!(rendered.contains("```\nnhs, digital health, informatics\n```"));
+        assert!(rendered.contains("**Tag character count**: 32/500 ✓"));
+        assert!(rendered.contains("Human notes."));
+    }
+
+    #[test]
+    fn marks_an_over_long_tag_list() {
+        let mut doc = document(PUBLICATION);
+        doc.set_tags(&"a,".repeat(300)).unwrap();
+        assert!(doc.render().contains("/500 ✗"));
+    }
+
+    #[test]
+    fn replaces_unfenced_tags_in_place() {
+        let source = "### Tags Used\n[To be added]\n\n## Guest Review\n\n- **Changed to public**: [To be added]\n";
+        let mut doc = document(source);
+        doc.set_tags("nhs, digital health").unwrap();
+        assert_eq!(
+            doc.render(),
+            "### Tags Used\nnhs, digital health\n\n## Guest Review\n\n- **Changed to public**: [To be added]\n"
+        );
+    }
+
+    #[test]
+    fn adds_a_missing_platform_before_the_manual_steps() {
+        let mut doc = document(PUBLICATION);
+        assert!(doc.add_platform("Mastodon").unwrap().is_some());
+
+        let rendered = doc.render();
+        let mastodon = rendered.find("### Mastodon").unwrap();
+        assert!(mastodon > rendered.find("### Bluesky").unwrap());
+        assert!(mastodon < rendered.find("## Manual YouTube Studio Steps").unwrap());
+        assert!(rendered.contains("- **Post URL**: [To be added]"));
+
+        // The new section is usable by the other commands straight away.
+        doc.set_draft("Mastodon", "Draft", "Hello.").unwrap();
+        assert!(doc.render().contains("```text\nHello.\n```"));
+    }
+
+    #[test]
+    fn adding_an_existing_platform_changes_nothing() {
+        let mut doc = document(PUBLICATION);
+        assert!(doc.add_platform("Bluesky").unwrap().is_none());
+        assert_eq!(doc.render(), PUBLICATION);
+    }
+
+    #[test]
+    fn adds_a_platform_to_a_document_without_manual_steps() {
+        let source = "## Social Media & Publicity\n\n### Bluesky\n- **Post URL**: [To be added]\n\n## Notes\n\nHuman notes.\n";
+        let mut doc = document(source);
+        assert!(doc.add_platform("LinkedIn").unwrap().is_some());
+        let rendered = doc.render();
+        assert!(rendered.find("### LinkedIn").unwrap() < rendered.find("## Notes").unwrap());
+        assert!(rendered.ends_with("Human notes.\n"));
+    }
+
+    #[test]
+    fn exposes_fields_with_their_sections() {
+        let fields = document(CANONICAL).fields();
+        let post_url = fields
+            .iter()
+            .find(|(_, label, _)| label == "Post URL")
+            .unwrap();
+        assert_eq!(post_url.0.last().unwrap(), "Bluesky");
+        assert!(
+            !fields
+                .iter()
+                .any(|(_, _, value)| value.contains("Original human-reviewed"))
+        );
     }
 
     #[test]

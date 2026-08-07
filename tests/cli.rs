@@ -283,6 +283,87 @@ fn replacing_a_draft_preserves_the_rest_of_the_document() {
 }
 
 #[test]
+fn publication_updates_touch_only_their_own_lines() {
+    let fixture = EpisodeFixture::with_document("publication", false);
+    let before = fixture.metadata();
+    let episode = fixture.episode.to_str().unwrap().to_owned();
+
+    let run = |arguments: &[&str]| {
+        let output = cargo_bin_cmd!("eps").args(arguments).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{arguments:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    run(&[
+        "episode",
+        "mark-playlist",
+        &episode,
+        "PLfixturesafety",
+        "--note",
+        "Added 2026-08-07T09:00:00Z",
+    ]);
+    run(&["episode", "add-platform", &episode, "Mastodon"]);
+
+    let tags = fixture.episode.join("tags.txt");
+    fs::write(&tags, "nhs, digital health, informatics\n").unwrap();
+    run(&[
+        "episode",
+        "set-tags",
+        &episode,
+        "--from-file",
+        tags.to_str().unwrap(),
+    ]);
+
+    let after = fixture.metadata();
+    assert!(after.contains("- [x] Clinical Safety (PLfixturesafety) - Added 2026-08-07T09:00:00Z"));
+    assert!(after.contains("```\nnhs, digital health, informatics\n```"));
+    assert!(after.contains("**Tag character count**: 32/500 ✓"));
+
+    // The manual studio steps use the same checkbox syntax and must be untouched.
+    for untouched in [
+        "- [ ] Verify license is \"Creative Commons - Attribution\"",
+        "- [ ] More options > Remixing > \"Don't allow remixing\"",
+        "- [ ] Content declaration > \"No\" to altered content",
+        "- [ ] Audio-Only Podcast Version (PLfixtureaudio) - add manually in YouTube Studio",
+        "- [x] EVERYTHING Fixture Channel - BINGE WATCH (PLfixturebinge) - Added 2026-07-29T10:00:00Z",
+        "Original human-reviewed Bluesky draft.",
+        "Human prose that must survive every update exactly.",
+    ] {
+        assert!(after.contains(untouched), "lost: {untouched}");
+    }
+
+    let mastodon = after.find("### Mastodon").unwrap();
+    assert!(mastodon > after.find("### Bluesky").unwrap());
+    assert!(mastodon < after.find("## Manual YouTube Studio Steps").unwrap());
+    assert_eq!(before.lines().count() + 11, after.lines().count());
+}
+
+#[test]
+fn marking_an_unlisted_playlist_fails_without_changing_anything() {
+    let fixture = EpisodeFixture::with_document("publication", false);
+    let before = fixture.metadata();
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "episode",
+            "mark-playlist",
+            fixture.episode.to_str().unwrap(),
+            "PLnotinthisdocument",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("PLnotinthisdocument")
+    );
+    assert_eq!(fixture.metadata(), before);
+}
+
+#[test]
 fn completions_generate_for_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         let output = cargo_bin_cmd!("eps")
@@ -309,11 +390,15 @@ impl EpisodeFixture {
     const BASE: &'static str = "2026.07.29-fixture-nhs-numbers";
 
     fn new(truncated_chapters: bool) -> Self {
+        Self::with_document("canonical", truncated_chapters)
+    }
+
+    fn with_document(shape: &str, truncated_chapters: bool) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let episode = temp.path().join("episodes/in-progress").join(Self::BASE);
         fs::create_dir_all(&episode).unwrap();
         let metadata =
-            fs::read_to_string(fixture("episode-data/canonical.episode-data.md")).unwrap();
+            fs::read_to_string(fixture(&format!("episode-data/{shape}.episode-data.md"))).unwrap();
         fs::write(
             episode.join(format!("{}.episode-data.md", Self::BASE)),
             metadata,

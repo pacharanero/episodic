@@ -97,6 +97,50 @@ pub fn set_draft(
     finish(document, metadata_path, changes, dry_run, format)
 }
 
+/// Replace the generated tag list.
+pub fn set_tags(path: &Path, tags: &str, dry_run: bool, format: OutputFormat) -> Result<()> {
+    let (_, metadata_path, _) = episode::locate(path)?;
+    let mut document = Document::read(&metadata_path)?;
+    let changes = document.set_tags(tags)?;
+
+    finish(document, metadata_path, changes, dry_run, format)
+}
+
+/// Record that one playlist was successfully added.
+pub fn mark_playlist(
+    path: &Path,
+    playlist: &str,
+    note: Option<&str>,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let (_, metadata_path, _) = episode::locate(path)?;
+    let mut document = Document::read(&metadata_path)?;
+    let changes = document
+        .mark_playlist(playlist, note)?
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    finish(document, metadata_path, changes, dry_run, format)
+}
+
+/// Add a missing social platform section.
+pub fn add_platform(
+    path: &Path,
+    platform: &str,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let (_, metadata_path, _) = episode::locate(path)?;
+    let mut document = Document::read(&metadata_path)?;
+    let changes = document
+        .add_platform(platform)?
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    finish(document, metadata_path, changes, dry_run, format)
+}
+
 /// Write only when something actually changed, so a no-op update never
 /// rewrites the file or updates its modification time.
 fn finish(

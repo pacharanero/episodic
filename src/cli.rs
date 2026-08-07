@@ -11,7 +11,7 @@ use clap_complete::Shell;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -101,6 +101,47 @@ enum EpisodeCommand {
     Set(SetArgs),
     /// Replace a social draft block, preserving all other content.
     SetDraft(SetDraftArgs),
+    /// Replace the generated tag list, preserving all other content.
+    SetTags(SetTagsArgs),
+    /// Record that one playlist was successfully added.
+    MarkPlaylist(MarkPlaylistArgs),
+    /// Add a missing social platform section.
+    AddPlatform(AddPlatformArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct SetTagsArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    path: PathBuf,
+
+    /// Read the tags from a file instead of standard input.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    from_file: Option<PathBuf>,
+}
+
+#[derive(Debug, clap::Args)]
+struct MarkPlaylistArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    path: PathBuf,
+
+    /// Playlist ID, matched against the entries in the playlist section.
+    playlist: String,
+
+    /// Detail to append, for example 'Added 2026-08-07T09:00:00Z'.
+    #[arg(long)]
+    note: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+struct AddPlatformArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    path: PathBuf,
+
+    /// Platform section to add, for example Mastodon.
+    platform: String,
 }
 
 #[derive(Debug, clap::Args)]
@@ -204,17 +245,7 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Episode {
             command: Some(EpisodeCommand::SetDraft(args)),
         }) => {
-            let text = match &args.from_file {
-                Some(path) => fs::read_to_string(path)
-                    .with_context(|| format!("could not read draft {}", path.display()))?,
-                None => {
-                    let mut text = String::new();
-                    io::stdin()
-                        .read_to_string(&mut text)
-                        .context("could not read draft from standard input")?;
-                    text
-                }
-            };
+            let text = read_input(args.from_file.as_deref(), "draft")?;
             commands::episode::set_draft(
                 &args.path,
                 &args.platform,
@@ -223,6 +254,39 @@ pub fn run() -> Result<()> {
                 cli.dry_run,
                 cli.format,
             )
+        }
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::SetTags(args)),
+        }) => {
+            let tags = read_input(args.from_file.as_deref(), "tags")?;
+            commands::episode::set_tags(&args.path, &tags, cli.dry_run, cli.format)
+        }
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::MarkPlaylist(args)),
+        }) => commands::episode::mark_playlist(
+            &args.path,
+            &args.playlist,
+            args.note.as_deref(),
+            cli.dry_run,
+            cli.format,
+        ),
+        Some(RootCommand::Episode {
+            command: Some(EpisodeCommand::AddPlatform(args)),
+        }) => commands::episode::add_platform(&args.path, &args.platform, cli.dry_run, cli.format),
+    }
+}
+
+/// Read command input from a file or standard input.
+fn read_input(from_file: Option<&Path>, what: &str) -> Result<String> {
+    match from_file {
+        Some(path) => fs::read_to_string(path)
+            .with_context(|| format!("could not read {what} from {}", path.display())),
+        None => {
+            let mut text = String::new();
+            io::stdin()
+                .read_to_string(&mut text)
+                .with_context(|| format!("could not read {what} from standard input"))?;
+            Ok(text)
         }
     }
 }
@@ -242,7 +306,7 @@ fn print_channel_help() -> Result<()> {
 
 fn print_episode_help() -> Result<()> {
     println!(
-        "Inspect and validate episode state\n\nUsage: eps episode <COMMAND>\n\nCommands:\n  inspect    Inspect local episode state without changing it\n  validate   Validate local upload readiness and lifecycle consistency\n  set        Set managed metadata fields, preserving all other content\n  set-draft  Replace a social draft block, preserving all other content"
+        "Inspect and validate episode state\n\nUsage: eps episode <COMMAND>\n\nCommands:\n  inspect        Inspect local episode state without changing it\n  validate       Validate local upload readiness and lifecycle consistency\n  set            Set managed metadata fields, preserving all other content\n  set-draft      Replace a social draft block, preserving all other content\n  set-tags       Replace the generated tag list, preserving all other content\n  mark-playlist  Record that one playlist was successfully added\n  add-platform   Add a missing social platform section"
     );
     Ok(())
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use crate::document::Document;
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -111,13 +112,7 @@ impl EpisodeReport {
 
 pub fn inspect(input: &Path) -> Result<EpisodeReport> {
     let (episode_path, metadata_path, base) = locate(input)?;
-    let markdown = fs::read_to_string(&metadata_path).with_context(|| {
-        format!(
-            "could not read episode metadata {}",
-            metadata_path.display()
-        )
-    })?;
-    let values = labelled_fields(&markdown);
+    let values = labelled_fields(&Document::read(&metadata_path)?);
     let fields = EpisodeFields {
         episode_date: value(&values, "Episode Date"),
         publication_date: value(&values, "Publication Date"),
@@ -204,15 +199,17 @@ pub fn locate(input: &Path) -> Result<(PathBuf, PathBuf, String)> {
     }
 }
 
-fn labelled_fields(markdown: &str) -> BTreeMap<String, String> {
-    markdown
-        .lines()
-        .filter_map(|line| {
-            let rest = line.trim().strip_prefix("- **")?;
-            let (label, raw_value) = rest.split_once("**:")?;
-            Some((label.trim().to_owned(), raw_value.trim().to_owned()))
-        })
-        .collect()
+/// Index fields by label, and also by `Section / Label` so a caller can reach
+/// a field whose label repeats across sections.
+fn labelled_fields(document: &Document) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    for (headings, label, value) in document.fields() {
+        if let Some(section) = headings.last() {
+            fields.insert(format!("{section} / {label}"), value.clone());
+        }
+        fields.entry(label).or_insert(value);
+    }
+    fields
 }
 
 fn value(fields: &BTreeMap<String, String>, label: &str) -> Option<String> {
@@ -549,13 +546,15 @@ fn warning(findings: &mut Vec<Finding>, code: &'static str, message: impl Into<S
 
 #[cfg(test)]
 mod tests {
-    use super::{labelled_fields, parse_chapter_timestamp, parse_srt_timestamp, value};
+    use super::{Document, labelled_fields, parse_chapter_timestamp, parse_srt_timestamp, value};
+    use std::path::Path;
 
     #[test]
     fn parses_labelled_fields_and_placeholders() {
-        let fields = labelled_fields(
+        let fields = labelled_fields(&Document::parse(
+            Path::new("test.episode-data.md"),
             "- **Title**: Test episode\n- **Video ID**: [To be added]\n- **Show Notes**: `notes.md`\n",
-        );
+        ));
         assert_eq!(value(&fields, "Title").as_deref(), Some("Test episode"));
         assert_eq!(value(&fields, "Video ID"), None);
         assert_eq!(value(&fields, "Show Notes").as_deref(), Some("notes.md"));
