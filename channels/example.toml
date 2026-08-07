@@ -55,6 +55,26 @@ raw_media_retention_days = 180
 # the exact upload source and is never a retention candidate.
 canonical_uploaded_video = "<base>.processed.mp4"
 
+# Contracts generated metadata must satisfy before it can be published.
+# Every value has a default, so the whole section may be omitted.
+[metadata]
+chapters_min = 6
+chapters_max = 12
+chapter_coverage = 0.75
+tags_min = 10
+tags_max = 15
+tags_required_final = "example channel"
+description_required_headings = ["CHAPTERS", "LINKS MENTIONED"]
+
+[metadata.social.bluesky-draft]
+max_characters = 280
+urls = 0
+
+[metadata.social.linkedin-draft]
+min_words = 150
+max_words = 300
+must_contain = "Full episode linked in the comments."
+
 # Loudness chain applied to episode audio. Every value has a sensible default,
 # so the whole section may be omitted.
 [audio]

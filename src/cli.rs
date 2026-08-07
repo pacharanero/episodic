@@ -65,6 +65,11 @@ enum RootCommand {
         #[command(subcommand)]
         command: Option<EpisodeCommand>,
     },
+    /// Generate episode metadata with the configured model.
+    Metadata {
+        #[command(subcommand)]
+        command: Option<MetadataCommand>,
+    },
     /// Produce transcripts and captions.
     Transcript {
         #[command(subcommand)]
@@ -84,6 +89,77 @@ enum AudioCommand {
     },
     /// Apply the channel's loudness chain, producing the upload master.
     Process(MediaArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum MetadataCommand {
+    /// Generate YouTube chapter markers from a transcript.
+    Chapters(TranscriptTaskArgs),
+    /// Generate the tag list from a transcript.
+    Tags(TranscriptTaskArgs),
+    /// Generate thumbnail quote candidates from a transcript.
+    Quote(TranscriptTaskArgs),
+    /// Generate the YouTube description.
+    Description(TaskArgs),
+    /// Draft a post for one social platform.
+    Social {
+        /// Platform task, for example bluesky-draft.
+        task: String,
+
+        #[command(flatten)]
+        args: TaskArgs,
+    },
+    /// Check an existing artefact against its task contract.
+    Check {
+        /// Task name, for example chapters.
+        task: String,
+
+        /// Artefact to check.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+        input: PathBuf,
+
+        /// Transcript, enabling the chapter coverage check.
+        #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+        transcript: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+struct TaskArgs {
+    /// Write the result here instead of standard output.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    output: Option<PathBuf>,
+
+    /// Transcript to condense into the prompt.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    transcript: Option<PathBuf>,
+
+    /// Extra prompt variables, as NAME=VALUE.
+    #[arg(long = "var", value_name = "NAME=VALUE")]
+    variables: Vec<String>,
+
+    /// Regenerate even if the output already exists.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Debug, clap::Args)]
+struct TranscriptTaskArgs {
+    /// Whisper SRT transcript.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    transcript: PathBuf,
+
+    /// Write the result here instead of standard output.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    output: Option<PathBuf>,
+
+    /// Extra prompt variables, as NAME=VALUE.
+    #[arg(long = "var", value_name = "NAME=VALUE")]
+    variables: Vec<String>,
+
+    /// Regenerate even if the output already exists.
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -314,6 +390,13 @@ pub fn run() -> Result<()> {
                 cli.format,
             )
         }
+        Some(RootCommand::Metadata { command: None }) => print_family_help("metadata"),
+        Some(RootCommand::Metadata {
+            command: Some(command),
+        }) => {
+            let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            run_metadata(command, &config, cli.dry_run, cli.format)
+        }
         Some(RootCommand::Transcript { command: None }) => print_family_help("transcript"),
         Some(RootCommand::Transcript {
             command: Some(TranscriptCommand::Extract(args)),
@@ -449,6 +532,73 @@ fn print_root_help() -> Result<()> {
     Cli::command().print_help()?;
     println!();
     Ok(())
+}
+
+fn run_metadata(
+    command: MetadataCommand,
+    config: &Path,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    use commands::metadata::Request;
+
+    let (task, transcript, output, variables, force) = match &command {
+        MetadataCommand::Chapters(args) => (
+            "chapters",
+            Some(args.transcript.clone()),
+            args.output.clone(),
+            args.variables.clone(),
+            args.force,
+        ),
+        MetadataCommand::Tags(args) => (
+            "tags",
+            Some(args.transcript.clone()),
+            args.output.clone(),
+            args.variables.clone(),
+            args.force,
+        ),
+        MetadataCommand::Quote(args) => (
+            "thumbnail-quote",
+            Some(args.transcript.clone()),
+            args.output.clone(),
+            args.variables.clone(),
+            args.force,
+        ),
+        MetadataCommand::Description(args) => (
+            "youtube-description",
+            args.transcript.clone(),
+            args.output.clone(),
+            args.variables.clone(),
+            args.force,
+        ),
+        MetadataCommand::Social { task, args } => (
+            task.as_str(),
+            args.transcript.clone(),
+            args.output.clone(),
+            args.variables.clone(),
+            args.force,
+        ),
+        MetadataCommand::Check {
+            task,
+            input,
+            transcript,
+        } => {
+            return commands::metadata::check(config, task, input, transcript.as_deref(), format);
+        }
+    };
+
+    commands::metadata::generate(
+        &Request {
+            task,
+            config_path: config,
+            transcript_path: transcript.as_deref(),
+            variables: &variables,
+            output: output.as_deref(),
+            force,
+            dry_run,
+        },
+        format,
+    )
 }
 
 /// Print a command family's help by asking clap, so the listing can never

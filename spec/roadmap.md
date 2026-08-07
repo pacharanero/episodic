@@ -35,7 +35,16 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   Remaining: frame extraction and thumbnail composition.
 
-- [ ] **R9 - Port generated metadata commands.** Add provider-neutral chapters, tags, descriptions, quotes, and social drafts with condensed transcript inputs, bounded retries, schemas, and validation.
+- [~] **R9 - Port generated metadata commands.** `eps metadata chapters|tags|quote|description|social` generate through a provider-neutral adapter, and `eps metadata check` validates an existing artefact without calling a model.
+
+  Generation, validation, and retry are one operation: nothing is written until an attempt satisfies its task contract, and a run that cannot produce a valid answer in three attempts fails loudly rather than writing the last bad one. Rejected attempts are reported even when a later one succeeds, so a model that is drifting is visible. An empty response is a failure, not an artefact. An existing artefact is never regenerated without `--force`, which protects human edits.
+
+  Transcripts are condensed into fixed-length blocks before prompting, so prompt size tracks episode duration rather than Whisper's cue count. The chapter coverage check compares the last chapter against the transcript end, which is what catches a model that only saw part of the episode: shape alone cannot.
+
+  Task contracts are configuration. `[metadata]` carries chapter counts and coverage, tag counts and any required final tag, description headings, quote counts, and per-platform social limits, so the EDH-specific values that were hardcoded in the shell validators are now channel policy.
+
+  Remaining: `provider = "cli"` is the only implemented transport. Native provider routing follows the same path as D8.
+
 - [ ] **R10 - Implement YouTube planning, upload, verification, and reconciliation.** Talk to the API through `google-youtube3` (D8) rather than orchestrating `yutu`. Use resumable upload so an interrupted transfer resumes instead of restarting, refresh the existing OAuth token directly, default uploads to unlisted, require `--apply`, and record only verified outcomes. Guest approval is not a machine gate (D5): `--apply` on the public-publish action is the human checkpoint.
 - [ ] **R11 - Implement social planning, posting, and verification.** Keep drafting separate from posting and record confirmed destination URLs.
 - [ ] **R12 - Implement retention audit and guarded cleanup.** Preserve exact upload sources and quarantine selected candidates before deletion.

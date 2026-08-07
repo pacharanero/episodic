@@ -784,6 +784,219 @@ fn a_media_dry_run_reports_the_real_command_and_writes_nothing() {
     assert!(!workspace.root.join("episode.wav").exists());
 }
 
+/// A workspace with a prompt library and a scripted model.
+fn metadata_workspace(model_script: &str) -> (Workspace, PathBuf) {
+    let workspace = Workspace::new();
+    fs::create_dir_all(workspace.root.join("prompts")).unwrap();
+    fs::write(
+        workspace.root.join("prompts/chapters.md"),
+        "Chapters for {{channel.name}}.\n\n{{transcript}}\n",
+    )
+    .unwrap();
+
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let model = fake(&tools, "fake-model", model_script);
+
+    // Route the chapters task at a cli profile running the scripted model.
+    let mut config = fs::read_to_string(&workspace.config).unwrap();
+    config.push_str(&format!(
+        "\n[llm]\ndefault_profile = \"test\"\n\n[llm.profiles.test]\nprovider = \"cli\"\ncommand = \"{}\"\nmodel = \"scripted\"\ntimeout_seconds = 30\n\n[llm.tasks]\nchapters = \"test\"\n",
+        model.display()
+    ));
+    fs::write(&workspace.config, config).unwrap();
+
+    let transcript = workspace.root.join("episode.srt");
+    fs::write(
+        &transcript,
+        "1\n00:00:00,000 --> 00:00:10,000\nopening words\n\n2\n00:06:00,000 --> 00:06:30,000\nclosing words\n",
+    )
+    .unwrap();
+    (workspace, transcript)
+}
+
+/// Twelve valid chapter lines reaching the end of the fixture transcript.
+const VALID_CHAPTERS: &str = "0:00 Introduction\n1:00 A chapter about things\n2:00 Another chapter here\n3:00 A third chapter now\n4:00 A fourth chapter here\n5:00 A fifth chapter here\n6:00 A sixth chapter here";
+
+#[test]
+fn an_invalid_answer_is_retried_and_the_failure_reported() {
+    // A well-formed list with the wrong opening line: the shape is right, so
+    // only the task contract catches it.
+    let wrong_first_line = VALID_CHAPTERS.replacen("0:00 Introduction", "Introduction at 0:00", 1);
+    let script = format!(
+        "count_file=\"$(dirname \"$0\")/attempts\"\n\
+         count=$(cat \"$count_file\" 2>/dev/null || echo 0)\n\
+         echo $((count + 1)) > \"$count_file\"\n\
+         if [ \"$count\" -eq 0 ]; then\n\
+         cat <<'FIRST'\n{wrong_first_line}\nFIRST\n\
+         else\n\
+         cat <<'SECOND'\n{VALID_CHAPTERS}\nSECOND\n\
+         fi\n"
+    );
+    let (workspace, transcript) = metadata_workspace(&script);
+    let output = workspace.root.join("chapters.txt");
+
+    let result = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "--format",
+            "json",
+            "metadata",
+            "chapters",
+            transcript.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["attempts"], 2);
+    assert_eq!(report["applied"], true);
+    let rejected = report["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1);
+    assert!(
+        rejected[0].as_str().unwrap().contains("first chapter"),
+        "unexpected rejection reason: {}",
+        rejected[0]
+    );
+    assert!(
+        fs::read_to_string(&output)
+            .unwrap()
+            .starts_with("0:00 Introduction")
+    );
+}
+
+#[test]
+fn a_model_that_never_satisfies_the_contract_writes_nothing() {
+    let (workspace, transcript) = metadata_workspace("printf 'not chapters at all\n'");
+    let output = workspace.root.join("chapters.txt");
+
+    let result = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "metadata",
+            "chapters",
+            transcript.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr).unwrap();
+    assert!(stderr.contains("after 3 attempts"), "{stderr}");
+    // The whole point: a model failure must not leave a completed artefact.
+    assert!(!output.exists());
+}
+
+#[test]
+fn an_empty_model_response_is_a_failure_not_an_artefact() {
+    let (workspace, transcript) = metadata_workspace("exit 0");
+    let output = workspace.root.join("chapters.txt");
+
+    let result = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "metadata",
+            "chapters",
+            transcript.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8(result.stderr)
+            .unwrap()
+            .contains("empty output")
+    );
+    assert!(!output.exists());
+}
+
+#[test]
+fn generated_output_is_not_silently_regenerated() {
+    let (workspace, transcript) = metadata_workspace(&format!("printf '{VALID_CHAPTERS}\n'"));
+    let output = workspace.root.join("chapters.txt");
+    fs::write(&output, "human edited chapters\n").unwrap();
+
+    let result = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "--format",
+            "json",
+            "metadata",
+            "chapters",
+            transcript.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(result.status.success());
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["skipped"], true);
+    assert_eq!(
+        fs::read_to_string(&output).unwrap(),
+        "human edited chapters\n",
+        "an existing artefact must not be overwritten without --force"
+    );
+}
+
+#[test]
+fn an_existing_artefact_can_be_checked_without_a_model() {
+    let (workspace, transcript) = metadata_workspace("exit 1");
+    let artefact = workspace.root.join("chapters.txt");
+    fs::write(&artefact, format!("{VALID_CHAPTERS}\n")).unwrap();
+
+    let ok = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args([
+            "metadata",
+            "check",
+            "chapters",
+            artefact.to_str().unwrap(),
+            "--transcript",
+            transcript.to_str().unwrap(),
+        ])
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+
+    fs::write(&artefact, "0:00 Introduction\n").unwrap();
+    let bad = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args(["metadata", "check", "chapters", artefact.to_str().unwrap()])
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+}
+
 #[test]
 fn completions_generate_for_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {

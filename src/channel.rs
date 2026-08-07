@@ -25,6 +25,8 @@ pub struct ChannelConfig {
     #[serde(default)]
     pub audio: Option<AudioPolicy>,
     #[serde(default)]
+    pub metadata: Option<MetadataPolicy>,
+    #[serde(default)]
     pub transcription: Option<TranscriptionPolicy>,
     #[serde(default)]
     pub thumbnail: Option<ThumbnailPolicy>,
@@ -99,6 +101,133 @@ pub struct StoragePolicy {
     pub raw_media_retention_days: Option<u32>,
     /// Template for the file actually uploaded, with `<base>` substituted.
     pub canonical_uploaded_video: Option<String>,
+}
+
+/// What generated metadata must look like before it may be published.
+///
+/// These are the task contracts a model's answer is checked against. They are
+/// configuration because a channel may reasonably want different lengths or
+/// different required text; only structural rules live in code.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataPolicy {
+    #[serde(default = "default_chapters_min")]
+    pub chapters_min: u32,
+    #[serde(default = "default_chapters_max")]
+    pub chapters_max: u32,
+    /// The exact first chapter line YouTube expects.
+    #[serde(default = "default_first_chapter")]
+    pub first_chapter: String,
+    #[serde(default = "default_chapter_title_min")]
+    pub chapter_title_min_words: u32,
+    #[serde(default = "default_chapter_title_max")]
+    pub chapter_title_max_words: u32,
+    /// How much of the transcript the last chapter must reach. This is what
+    /// catches a model that only saw part of the episode.
+    #[serde(default = "default_chapter_coverage")]
+    pub chapter_coverage: f64,
+    #[serde(default = "default_tags_min")]
+    pub tags_min: u32,
+    #[serde(default = "default_tags_max")]
+    pub tags_max: u32,
+    #[serde(default = "default_tags_characters")]
+    pub tags_max_characters: u32,
+    /// A tag every episode must end with, if the channel wants one.
+    #[serde(default)]
+    pub tags_required_final: Option<String>,
+    #[serde(default = "default_description_characters")]
+    pub description_max_characters: u32,
+    #[serde(default)]
+    pub description_required_headings: Vec<String>,
+    #[serde(default = "default_quote_count")]
+    pub thumbnail_quote_count: u32,
+    #[serde(default = "default_quote_min_words")]
+    pub thumbnail_quote_min_words: u32,
+    #[serde(default = "default_quote_max_words")]
+    pub thumbnail_quote_max_words: u32,
+    /// Per-platform draft limits, keyed by task name.
+    #[serde(default)]
+    pub social: BTreeMap<String, SocialLimits>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SocialLimits {
+    #[serde(default)]
+    pub max_characters: Option<u32>,
+    #[serde(default)]
+    pub min_words: Option<u32>,
+    #[serde(default)]
+    pub max_words: Option<u32>,
+    /// Exactly how many URLs the draft must contain, when it matters.
+    #[serde(default)]
+    pub urls: Option<u32>,
+    /// Text the draft must include, such as a first-comment pointer.
+    #[serde(default)]
+    pub must_contain: Option<String>,
+}
+
+fn default_chapters_min() -> u32 {
+    6
+}
+fn default_chapters_max() -> u32 {
+    12
+}
+fn default_first_chapter() -> String {
+    "0:00 Introduction".to_owned()
+}
+fn default_chapter_title_min() -> u32 {
+    3
+}
+fn default_chapter_title_max() -> u32 {
+    8
+}
+fn default_chapter_coverage() -> f64 {
+    0.75
+}
+fn default_tags_min() -> u32 {
+    10
+}
+fn default_tags_max() -> u32 {
+    15
+}
+fn default_tags_characters() -> u32 {
+    500
+}
+fn default_description_characters() -> u32 {
+    5000
+}
+fn default_quote_count() -> u32 {
+    5
+}
+fn default_quote_min_words() -> u32 {
+    6
+}
+fn default_quote_max_words() -> u32 {
+    13
+}
+
+impl Default for MetadataPolicy {
+    fn default() -> Self {
+        Self {
+            chapters_min: default_chapters_min(),
+            chapters_max: default_chapters_max(),
+            first_chapter: default_first_chapter(),
+            chapter_title_min_words: default_chapter_title_min(),
+            chapter_title_max_words: default_chapter_title_max(),
+            chapter_coverage: default_chapter_coverage(),
+            tags_min: default_tags_min(),
+            tags_max: default_tags_max(),
+            tags_max_characters: default_tags_characters(),
+            tags_required_final: None,
+            description_max_characters: default_description_characters(),
+            description_required_headings: Vec::new(),
+            thumbnail_quote_count: default_quote_count(),
+            thumbnail_quote_min_words: default_quote_min_words(),
+            thumbnail_quote_max_words: default_quote_max_words(),
+            social: BTreeMap::new(),
+        }
+    }
 }
 
 /// The loudness chain applied to an episode's audio.
@@ -356,6 +485,7 @@ impl ChannelConfig {
         note(self.llm.is_some(), "llm");
         note(self.storage.is_some(), "storage");
         note(self.audio.is_some(), "audio");
+        note(self.metadata.is_some(), "metadata");
         note(self.transcription.is_some(), "transcription");
         note(self.thumbnail.is_some(), "thumbnail");
         note(self.description.is_some(), "description");
@@ -563,6 +693,17 @@ fn config_issues(config: &ChannelConfig) -> Vec<String> {
     {
         issues.push("thumbnail.width and thumbnail.height must be greater than zero".to_owned());
     }
+    if let Some(metadata) = &config.metadata {
+        if metadata.chapters_min > metadata.chapters_max {
+            issues.push("metadata.chapters_min must not exceed metadata.chapters_max".to_owned());
+        }
+        if metadata.tags_min > metadata.tags_max {
+            issues.push("metadata.tags_min must not exceed metadata.tags_max".to_owned());
+        }
+        if !(0.0..=1.0).contains(&metadata.chapter_coverage) {
+            issues.push("metadata.chapter_coverage must be a fraction between 0 and 1".to_owned());
+        }
+    }
     if let Some(audio) = &config.audio {
         if audio.target_lufs > 0.0 {
             issues.push("audio.target_lufs is a LUFS value and must not be positive".to_owned());
@@ -695,6 +836,7 @@ mod tests {
                 "description",
                 "hashtags",
                 "llm",
+                "metadata",
                 "paths",
                 "playlists",
                 "recording",
