@@ -64,7 +64,7 @@ The initial implementation is a single package with a library and `eps` binary. 
 | Transcription | Invoke Whisper or a configured equivalent and validate the transcript family. |
 | LLM | Route named tasks to configured providers, apply bounded retries, and validate outputs before publication. |
 | Image | Invoke ImageMagick for frame and thumbnail operations. |
-| YouTube | Orchestrate `yutu`; do not duplicate YouTube API semantics. |
+| YouTube | Call the Data API through `google-youtube3` (D8), with resumable upload and direct OAuth refresh. |
 | Social | Invoke explicit platform APIs or controlled manual fallbacks. |
 
 Adapters must expose the command and version used, redact secrets, and return useful error context. Empty or malformed output is failure, not a completed artefact.
