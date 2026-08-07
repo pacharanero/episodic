@@ -7,3 +7,4 @@ pub mod episode;
 pub mod media;
 pub mod metadata;
 pub mod version;
+pub mod youtube;

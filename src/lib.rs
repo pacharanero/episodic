@@ -18,3 +18,4 @@ pub mod thumbnail;
 pub mod tool;
 pub mod transcript;
 pub mod validate;
+pub mod youtube;

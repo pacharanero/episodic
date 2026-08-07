@@ -75,6 +75,11 @@ enum RootCommand {
         #[command(subcommand)]
         command: Option<ThumbnailCommand>,
     },
+    /// Upload to and reconcile with YouTube.
+    Youtube {
+        #[command(subcommand)]
+        command: Option<YoutubeCommand>,
+    },
     /// Produce transcripts and captions.
     Transcript {
         #[command(subcommand)]
@@ -173,6 +178,53 @@ struct TranscriptTaskArgs {
     /// Regenerate even if the output already exists.
     #[arg(long)]
     force: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum YoutubeCommand {
+    /// Show what an upload would do, contacting nothing.
+    PlanUpload(UploadArgs),
+    /// Upload the episode. Requires --apply.
+    Upload(UploadArgs),
+    /// Compare the episode record against the destination.
+    Verify {
+        /// Episode directory or canonical metadata file.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+        episode: PathBuf,
+    },
+    /// Change a video's privacy, for example to make it public.
+    Publish {
+        /// Episode directory or canonical metadata file.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+        episode: PathBuf,
+
+        /// Privacy to set.
+        #[arg(long, default_value = "public")]
+        privacy: String,
+
+        /// Perform the change. Without this the command only reports it.
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+struct UploadArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    episode: PathBuf,
+
+    /// Playlist IDs to add the video to.
+    #[arg(long = "playlist", value_name = "PLAYLIST_ID")]
+    playlists: Vec<String>,
+
+    /// Privacy for the new video. Defaults to the channel's, or unlisted.
+    #[arg(long)]
+    privacy: Option<String>,
+
+    /// Perform the upload. Without this the command only reports the plan.
+    #[arg(long)]
+    apply: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -440,6 +492,43 @@ pub fn run() -> Result<()> {
         }) => {
             let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
             run_metadata(command, &config, cli.dry_run, cli.format)
+        }
+        Some(RootCommand::Youtube { command: None }) => print_family_help("youtube"),
+        Some(RootCommand::Youtube {
+            command: Some(command),
+        }) => {
+            let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            match command {
+                YoutubeCommand::PlanUpload(args) => commands::youtube::plan_upload(
+                    &config,
+                    &args.episode,
+                    &args.playlists,
+                    args.privacy.as_deref(),
+                    cli.format,
+                ),
+                YoutubeCommand::Upload(args) => commands::youtube::upload(
+                    &config,
+                    &args.episode,
+                    &args.playlists,
+                    args.privacy.as_deref(),
+                    args.apply && !cli.dry_run,
+                    cli.format,
+                ),
+                YoutubeCommand::Verify { episode } => {
+                    commands::youtube::verify(&config, &episode, cli.format)
+                }
+                YoutubeCommand::Publish {
+                    episode,
+                    privacy,
+                    apply,
+                } => commands::youtube::publish_video(
+                    &config,
+                    &episode,
+                    &privacy,
+                    apply && !cli.dry_run,
+                    cli.format,
+                ),
+            }
         }
         Some(RootCommand::Thumbnail { command: None }) => print_family_help("thumbnail"),
         Some(RootCommand::Thumbnail {

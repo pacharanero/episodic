@@ -47,7 +47,16 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   Remaining: `provider = "cli"` is the only implemented transport. Native provider routing follows the same path as D8.
 
-- [ ] **R10 - Implement YouTube planning, upload, verification, and reconciliation.** Talk to the API through `google-youtube3` (D8) rather than orchestrating `yutu`. Use resumable upload so an interrupted transfer resumes instead of restarting, refresh the existing OAuth token directly, default uploads to unlisted, require `--apply`, and record only verified outcomes. Guest approval is not a machine gate (D5): `--apply` on the public-publish action is the human checkpoint.
+- [~] **R10 - Implement YouTube planning, upload, verification, and reconciliation.** `eps youtube plan-upload|upload|verify|publish` talk to the Data API through `google-youtube3` (D8). Authentication reuses the workspace's existing refresh token through the authorised-user flow, so no browser and no `yutu` are involved; a token with no refresh token is refused with an explanation rather than an obscure failure.
+
+  Command logic depends on a `Destination` trait rather than on the API client, so planning, applying, verifying, and recording are all tested against an in-memory fake. The API implementation is the only code that talks to Google, and the async runtime is contained inside it: `eps` is a one-shot process with nothing to overlap, so the rest of the engine stays synchronous.
+
+  Uploads use the resumable endpoint, default to unlisted, and require `--apply`; making a video public is a separate command. The video ID is written to the record the moment the upload returns, before anything else is attempted, because everything after that can be retried and an unrecorded ID cannot be recovered. Nothing else is recorded until the destination confirms it: a playlist only where YouTube reports the video in it, captions only where YouTube reports tracks, and the thumbnail, which cannot be read back, labelled unverified.
+
+  Verified against the live API: reading a published episode returned its privacy, caption count, and playlist membership, and reconciliation correctly reported an episode whose record says unlisted while YouTube says public.
+
+  Remaining: retrying an interrupted resumable upload from the command line, and a `captions`/`thumbnail`/`playlist` command for fixing up an episode that is already uploaded.
+
 - [ ] **R11 - Implement social planning, posting, and verification.** Keep drafting separate from posting and record confirmed destination URLs.
 - [ ] **R12 - Implement retention audit and guarded cleanup.** Preserve exact upload sources and quarantine selected candidates before deletion.
 
