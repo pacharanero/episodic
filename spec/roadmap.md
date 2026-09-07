@@ -35,7 +35,7 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   `eps thumbnail frames` extracts evenly spaced interior frames, skipping the first and last twentieth so intro and outro slates are not offered as candidates. Extraction is per-frame idempotent: a frame that already exists is never regenerated, because it may be the one already chosen or hand-cropped.
 
-  `eps thumbnail compose` overlays the caption and emits both the upload PNG and an editable SVG companion referencing the frame by relative path. Both must exist for the pair to count as done, so a half-finished pair is retried rather than mistaken for success. Canvas size, font, point size, fill, stroke, uppercasing, and quoting all come from `[thumbnail]`. Verified pixel-identical to the shell implementation on the same input.
+  `eps thumbnail compose` overlays the caption and emits both the upload PNG and an editable SVG companion referencing the frame by relative path. Both must exist for the pair to count as done, so a half-finished pair is retried rather than mistaken for success. Canvas size, font, point size, fill, stroke, adaptive frame contrast, uppercasing, and quoting all come from `[thumbnail]`. Adaptive contrast selects black or white text from the frame luminance and uses the opposite colour for the outline. Verified pixel-identical to the shell implementation on the same input when adaptive contrast is disabled.
 
   The parent workspace's `s/process` now composes these focused commands with `eps metadata chapters|tags|quote`, using JSON output to carry each canonical path into the next step. Its compatibility fixture proves the six-step order and the clean `<base>` naming when the source is `<base>.processed.mp4`.
 

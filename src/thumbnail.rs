@@ -23,6 +23,12 @@ const EDGE_MARGIN: f64 = 0.05;
 const CAPTION_WIDTH: f64 = 0.86;
 const CAPTION_HEIGHT: f64 = 0.89;
 
+#[derive(Debug, PartialEq)]
+struct TextColours {
+    fill: String,
+    stroke: String,
+}
+
 /// ImageMagick 7 renamed the entry point; `convert` remains as a deprecated
 /// alias, so prefer `magick` and fall back for older installations.
 fn imagemagick() -> Result<Tool> {
@@ -174,16 +180,28 @@ pub fn compose(
         (f64::from(policy.width) * CAPTION_WIDTH) as u32,
         (f64::from(policy.height) * CAPTION_HEIGHT) as u32
     );
+    let configured_colours = TextColours {
+        fill: policy.fill.clone().unwrap_or_else(|| "black".to_owned()),
+        stroke: policy.stroke.clone().unwrap_or_else(|| "white".to_owned()),
+    };
 
     if dry_run {
+        let colours = if policy.adaptive_contrast {
+            TextColours {
+                fill: "<black-or-white-from-frame>".to_owned(),
+                stroke: "<opposite-colour>".to_owned(),
+            }
+        } else {
+            configured_colours
+        };
         return Ok(MediaOutcome {
             input: image.to_path_buf(),
             outputs: vec![png, svg],
             commands: vec![format!(
                 "{} -background none -fill {} -stroke {} -font {} -size {caption_size} caption:{caption:?} ... -resize {canvas}^ -composite <output>",
                 magick.path.display(),
-                policy.fill.as_deref().unwrap_or("black"),
-                policy.stroke.as_deref().unwrap_or("white"),
+                colours.fill,
+                colours.stroke,
                 font.display()
             )],
             applied: false,
@@ -211,6 +229,12 @@ pub fn compose(
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     fs::create_dir_all(&directory)?;
 
+    let colours = if policy.adaptive_contrast {
+        adaptive_colours(&magick, image)?
+    } else {
+        configured_colours
+    };
+
     let caption_tile = tempfile::Builder::new()
         .prefix(".caption.")
         .suffix(".png")
@@ -221,9 +245,9 @@ pub fn compose(
         "-background".to_owned(),
         "none".to_owned(),
         "-fill".to_owned(),
-        policy.fill.clone().unwrap_or_else(|| "black".to_owned()),
+        colours.fill.clone(),
         "-stroke".to_owned(),
-        policy.stroke.clone().unwrap_or_else(|| "white".to_owned()),
+        colours.stroke.clone(),
         "-strokewidth".to_owned(),
         policy.stroke_width.unwrap_or(4).to_string(),
         "-font".to_owned(),
@@ -269,7 +293,7 @@ pub fn compose(
         );
     }
 
-    let svg_source = build_svg(image, &svg, &caption, policy);
+    let svg_source = build_svg(image, &svg, &caption, policy, &colours);
     fs::write(&svg, svg_source)?;
     fs::rename(&staged_png, &png)?;
 
@@ -281,6 +305,43 @@ pub fn compose(
         skipped: false,
         detail: Some(format!("caption: {caption}")),
     })
+}
+
+fn adaptive_colours(magick: &Tool, image: &Path) -> Result<TextColours> {
+    let output = magick.run(&[
+        image.display().to_string(),
+        "-colorspace".to_owned(),
+        "Gray".to_owned(),
+        "-resize".to_owned(),
+        "1x1!".to_owned(),
+        "-format".to_owned(),
+        "%[fx:mean]".to_owned(),
+        "info:".to_owned(),
+    ])?;
+    let mean = String::from_utf8(output.stdout)
+        .context("ImageMagick returned non-UTF-8 frame luminance")?
+        .trim()
+        .parse::<f64>()
+        .context("ImageMagick returned an invalid frame luminance")?;
+    if !(0.0..=1.0).contains(&mean) {
+        bail!("ImageMagick returned frame luminance outside 0-1: {mean}");
+    }
+    Ok(colours_for_luminance(mean))
+}
+
+fn colours_for_luminance(luminance: f64) -> TextColours {
+    // At ~0.179, black and white have equal WCAG contrast against a background.
+    if luminance > 0.179 {
+        TextColours {
+            fill: "black".to_owned(),
+            stroke: "white".to_owned(),
+        }
+    } else {
+        TextColours {
+            fill: "white".to_owned(),
+            stroke: "black".to_owned(),
+        }
+    }
 }
 
 fn non_empty(path: &Path) -> bool {
@@ -315,7 +376,13 @@ fn default_output(image: &Path) -> PathBuf {
 
 /// An editable companion referencing the frame by relative path, with the
 /// caption as separate lines so it can be adjusted in a vector editor.
-fn build_svg(image: &Path, svg: &Path, caption: &str, policy: &ThumbnailPolicy) -> String {
+fn build_svg(
+    image: &Path,
+    svg: &Path,
+    caption: &str,
+    policy: &ThumbnailPolicy,
+    colours: &TextColours,
+) -> String {
     let width = policy.width;
     let height = policy.height;
     let point_size = policy.point_size.unwrap_or(100);
@@ -354,8 +421,8 @@ fn build_svg(image: &Path, svg: &Path, caption: &str, policy: &ThumbnailPolicy) 
 "#,
         title = escape_xml(caption),
         href = escape_xml(&relative_to(svg, image)),
-        fill = policy.fill.as_deref().unwrap_or("black"),
-        stroke = policy.stroke.as_deref().unwrap_or("white"),
+        fill = colours.fill,
+        stroke = colours.stroke,
         stroke_width = policy.stroke_width.unwrap_or(4),
     )
 }
@@ -501,10 +568,32 @@ mod tests {
             Path::new("/e/ep/ep.thumbnail.svg"),
             "\"DESIGN EHRS TO HELP CLINICIANS THINK\"",
             &policy,
+            &TextColours {
+                fill: "black".to_owned(),
+                stroke: "white".to_owned(),
+            },
         );
         assert!(svg.contains("viewBox=\"0 0 1280 720\""));
         assert!(svg.contains("href=\"ep.frames/frame-01.jpg\""));
         assert_eq!(svg.matches("<tspan").count(), 3);
         assert!(!svg.contains("\"DESIGN"), "raw quotes must be escaped");
+    }
+
+    #[test]
+    fn adaptive_colours_contrast_with_dark_and_light_frames() {
+        assert_eq!(
+            colours_for_luminance(0.05),
+            TextColours {
+                fill: "white".to_owned(),
+                stroke: "black".to_owned(),
+            }
+        );
+        assert_eq!(
+            colours_for_luminance(0.8),
+            TextColours {
+                fill: "black".to_owned(),
+                stroke: "white".to_owned(),
+            }
+        );
     }
 }

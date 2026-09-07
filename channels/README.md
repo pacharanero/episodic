@@ -27,6 +27,10 @@ A configuration is a small generic core plus typed integration records (D4). Onl
 
 A channel that publishes nowhere but YouTube carries no archive or social sections. Unknown top-level sections are rejected rather than ignored, so a typo fails validation instead of silently disabling policy.
 
+## Adaptive Thumbnail Contrast
+
+Set `adaptive_contrast = true` under `[thumbnail]` to choose black or white caption text from the selected frame's luminance and use the opposite colour for its outline. This overrides configured `fill` and `stroke` values during composition. Leave it disabled to retain fixed brand colours.
+
 ## What Does Not Belong In Channel Configuration
 
 - OAuth tokens, API keys, passwords, client secrets, or private guest data.

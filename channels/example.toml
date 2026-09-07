@@ -106,6 +106,9 @@ point_size = 100
 fill = "black"
 stroke = "white"
 stroke_width = 4
+# When true, frame luminance selects black or white text with the opposite
+# outline, overriding fill and stroke.
+adaptive_contrast = true
 uppercase = true
 quote_by_default = true
 

@@ -356,6 +356,10 @@ pub struct ThumbnailPolicy {
     pub stroke: Option<String>,
     #[serde(default)]
     pub stroke_width: Option<u32>,
+    /// Choose black or white text from the frame luminance and use the opposite
+    /// colour for the outline. When enabled, this overrides `fill` and `stroke`.
+    #[serde(default)]
+    pub adaptive_contrast: bool,
     #[serde(default)]
     pub uppercase: Option<bool>,
     #[serde(default)]
@@ -379,6 +383,7 @@ impl Default for ThumbnailPolicy {
             fill: None,
             stroke: None,
             stroke_width: None,
+            adaptive_contrast: false,
             uppercase: None,
             quote_by_default: None,
         }
