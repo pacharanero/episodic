@@ -28,6 +28,8 @@ pub struct VideoState {
 #[derive(Clone, Debug, Serialize)]
 pub struct UploadRequest {
     pub file: PathBuf,
+    /// Opaque Google resumable-upload URL, persisted between invocations.
+    pub session_file: PathBuf,
     pub title: String,
     pub description: String,
     pub tags: Vec<String>,

@@ -5,6 +5,7 @@ use crate::channel;
 use crate::commands;
 use crate::output::OutputFormat;
 use crate::paths::tilde_pathbuf;
+use crate::youtube::publish;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
@@ -192,6 +193,23 @@ enum YoutubeCommand {
         #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
         episode: PathBuf,
     },
+    /// Upload or replace the episode's caption track. Requires --apply.
+    Captions(RepairArgs),
+    /// Set the episode's thumbnail. Requires --apply.
+    Thumbnail(RepairArgs),
+    /// Add the episode to a playlist. Requires --apply.
+    Playlist {
+        /// Episode directory or canonical metadata file.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+        episode: PathBuf,
+
+        /// Playlist ID to add the video to.
+        playlist: String,
+
+        /// Perform the change. Without this the command only reports it.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Change a video's privacy, for example to make it public.
     Publish {
         /// Episode directory or canonical metadata file.
@@ -206,6 +224,17 @@ enum YoutubeCommand {
         #[arg(long)]
         apply: bool,
     },
+}
+
+#[derive(Debug, clap::Args)]
+struct RepairArgs {
+    /// Episode directory or canonical metadata file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+    episode: PathBuf,
+
+    /// Perform the change. Without this the command only reports it.
+    #[arg(long)]
+    apply: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -517,6 +546,31 @@ pub fn run() -> Result<()> {
                 YoutubeCommand::Verify { episode } => {
                     commands::youtube::verify(&config, &episode, cli.format)
                 }
+                YoutubeCommand::Captions(args) => commands::youtube::repair(
+                    &config,
+                    &args.episode,
+                    publish::RepairKind::Captions,
+                    args.apply && !cli.dry_run,
+                    cli.format,
+                ),
+                YoutubeCommand::Thumbnail(args) => commands::youtube::repair(
+                    &config,
+                    &args.episode,
+                    publish::RepairKind::Thumbnail,
+                    args.apply && !cli.dry_run,
+                    cli.format,
+                ),
+                YoutubeCommand::Playlist {
+                    episode,
+                    playlist,
+                    apply,
+                } => commands::youtube::repair(
+                    &config,
+                    &episode,
+                    publish::RepairKind::Playlist(playlist),
+                    apply && !cli.dry_run,
+                    cli.format,
+                ),
                 YoutubeCommand::Publish {
                     episode,
                     privacy,

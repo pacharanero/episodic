@@ -119,6 +119,34 @@ pub fn verify(config_path: &Path, episode: &Path, format: OutputFormat) -> Resul
     Ok(())
 }
 
+/// Repair one post-upload component and record only the destination's answer.
+pub fn repair(
+    config_path: &Path,
+    episode: &Path,
+    kind: publish::RepairKind,
+    apply: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let config = channel::load(config_path)?;
+    let plan = publish::plan_repair(episode, &config, kind)?;
+    if !apply {
+        let text = format!(
+            "{}\n\nThis is a plan. Pass --apply to change YouTube.",
+            plan.as_text()
+        );
+        return output::write(format, &plan, &text);
+    }
+
+    let destination = connect(config_path)?;
+    let outcome = publish::apply_repair(&destination, &plan, &now())?;
+    let complete = outcome.failed.is_empty();
+    output::write(format, &outcome, &outcome.as_text())?;
+    if !complete {
+        bail!("the repair could not be confirmed");
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct PrivacyChange {
     video_id: String,

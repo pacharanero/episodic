@@ -51,7 +51,7 @@ Original human-reviewed Bluesky draft.
 ## Manual YouTube Studio Steps (after upload)
 
 - [ ] Verify license is "Creative Commons - Attribution"
-- [ ] More options > Remixing > "Don't allow remixing"
+- [x] Remixing allowed (channel-wide policy; supports Shorts and publicity)
 - [ ] Content declaration > "No" to altered content
 
 ## Notes

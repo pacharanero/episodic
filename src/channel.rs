@@ -570,6 +570,20 @@ pub fn workspace_root(config_path: &Path) -> Result<PathBuf> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let is_nested_channel = directory
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "channels")
+        && config_path
+            .file_name()
+            .is_some_and(|name| name == "channel.toml");
+    if is_nested_channel && let Some(parent) = directory.parent().and_then(Path::parent) {
+        return Ok(if parent.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            parent.to_path_buf()
+        });
+    }
     if directory.file_name().is_some_and(|name| name == "channels")
         && let Some(parent) = directory.parent()
     {
@@ -613,10 +627,9 @@ pub fn list(directory: &Path) -> Result<Vec<ChannelListEntry>> {
     let mut paths = fs::read_dir(directory)
         .with_context(|| format!("could not read channel directory {}", directory.display()))?
         .filter_map(|entry| entry.ok().map(|item| item.path()))
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "toml")
-        })
+        .filter(|path| path.is_dir())
+        .map(|path| path.join("channel.toml"))
+        .filter(|path| path.is_file())
         .collect::<Vec<_>>();
     paths.sort();
 
@@ -647,7 +660,7 @@ pub fn resolve_path(explicit: Option<&Path>, channel: Option<&str>) -> Result<Pa
 
     let directory = PathBuf::from("channels");
     if let Some(id) = channel {
-        let path = directory.join(format!("{id}.toml"));
+        let path = directory.join(id).join("channel.toml");
         if path.is_file() {
             return Ok(path);
         }
@@ -827,7 +840,7 @@ mod tests {
             toml::from_str(&format!("{}\n[paths]\nepisodes = 'episodes'\n", identity())).unwrap();
         assert_eq!(
             config
-                .episodes_path(std::path::Path::new("/work/channels/example.toml"))
+                .episodes_path(std::path::Path::new("/work/channels/example/channel.toml"))
                 .unwrap(),
             std::path::PathBuf::from("/work/episodes")
         );
@@ -844,7 +857,7 @@ mod tests {
         let config: ChannelConfig = toml::from_str(identity()).unwrap();
         assert_eq!(
             config
-                .episodes_path(std::path::Path::new("/work/channels/example.toml"))
+                .episodes_path(std::path::Path::new("/work/channels/example/channel.toml"))
                 .unwrap(),
             std::path::PathBuf::from("/work/episodes")
         );

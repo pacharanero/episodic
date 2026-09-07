@@ -157,12 +157,14 @@ pub fn plan(
         steps.push(Step::Thumbnail);
     }
     steps.extend(playlists.iter().map(|id| Step::Playlist(id.clone())));
+    let session_file = directory.join(format!(".{base}.youtube-upload-session"));
 
     Ok(Plan {
         episode: directory,
         base,
         request: UploadRequest {
             file,
+            session_file,
             title,
             description,
             tags,
@@ -189,6 +191,177 @@ pub struct Outcome {
     pub confirmed: Vec<String>,
     pub failed: Vec<String>,
     pub recorded: Vec<String>,
+}
+
+/// One independently retryable operation for an already uploaded episode.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub enum RepairKind {
+    Captions,
+    Thumbnail,
+    Playlist(String),
+}
+
+#[derive(Debug, Serialize)]
+pub struct RepairPlan {
+    pub episode: PathBuf,
+    pub base: String,
+    pub video_id: String,
+    pub kind: RepairKind,
+    pub asset: Option<PathBuf>,
+    pub language: String,
+}
+
+impl RepairPlan {
+    pub fn as_text(&self) -> String {
+        let action = match &self.kind {
+            RepairKind::Captions => format!("upload captions from {}", self.asset_display()),
+            RepairKind::Thumbnail => format!("set thumbnail from {}", self.asset_display()),
+            RepairKind::Playlist(id) => format!("add to playlist {id}"),
+        };
+        format!(
+            "Repair plan for {}\n  Video: {}\n  Action: {action}",
+            self.base, self.video_id
+        )
+    }
+
+    fn asset_display(&self) -> String {
+        self.asset
+            .as_ref()
+            .map_or_else(|| "none".to_owned(), |path| path.display().to_string())
+    }
+}
+
+pub fn plan_repair(
+    episode_path: &Path,
+    config: &ChannelConfig,
+    kind: RepairKind,
+) -> Result<RepairPlan> {
+    let report = episode::inspect(episode_path)?;
+    let video_id = report
+        .fields
+        .video_id
+        .context("this episode has no recorded video ID")?;
+    let asset = match kind {
+        RepairKind::Captions => Some(report.episode_path.join(format!("{}.srt", report.base))),
+        RepairKind::Thumbnail => Some(
+            report
+                .episode_path
+                .join(format!("{}.thumbnail.png", report.base)),
+        ),
+        RepairKind::Playlist(_) => None,
+    };
+    if let Some(path) = &asset
+        && !path.is_file()
+    {
+        bail!("repair asset does not exist: {}", path.display());
+    }
+    let language = config
+        .youtube
+        .as_ref()
+        .and_then(|youtube| youtube.language.clone())
+        .unwrap_or_else(|| "en".to_owned());
+    Ok(RepairPlan {
+        episode: report.episode_path,
+        base: report.base,
+        video_id,
+        kind,
+        asset,
+        language,
+    })
+}
+
+pub fn apply_repair(
+    destination: &dyn Destination,
+    plan: &RepairPlan,
+    timestamp: &str,
+) -> Result<Outcome> {
+    let mut outcome = Outcome {
+        video_id: Some(plan.video_id.clone()),
+        ..Outcome::default()
+    };
+    match &plan.kind {
+        RepairKind::Captions => {
+            let track = plan
+                .asset
+                .as_deref()
+                .context("caption repair has no track")?;
+            destination.upload_caption(&plan.video_id, track, &plan.language, "English")?;
+            let count = destination.caption_count(&plan.video_id)?;
+            if count == 0 {
+                outcome
+                    .failed
+                    .push("captions uploaded but YouTube reports none".to_owned());
+            } else {
+                outcome
+                    .confirmed
+                    .push(format!("captions ({count} track(s))"));
+                record_repair_field(
+                    plan,
+                    "Captions",
+                    &format!("uploaded {timestamp}"),
+                    &mut outcome,
+                );
+            }
+        }
+        RepairKind::Thumbnail => {
+            let image = plan
+                .asset
+                .as_deref()
+                .context("thumbnail repair has no image")?;
+            destination.set_thumbnail(&plan.video_id, image)?;
+            outcome.confirmed.push("thumbnail (unverified)".to_owned());
+            record_repair_field(
+                plan,
+                "Uploaded",
+                &format!("{timestamp} (unverified)"),
+                &mut outcome,
+            );
+        }
+        RepairKind::Playlist(playlist) => {
+            destination.add_to_playlist(playlist, &plan.video_id)?;
+            if destination.playlist_contains(playlist, &plan.video_id)? {
+                outcome.confirmed.push(format!("playlist {playlist}"));
+                record_repair_playlist(plan, playlist, timestamp, &mut outcome);
+            } else {
+                outcome.failed.push(format!(
+                    "playlist {playlist} was added but YouTube does not report the video in it"
+                ));
+            }
+        }
+    }
+    Ok(outcome)
+}
+
+fn repair_metadata_path(plan: &RepairPlan) -> PathBuf {
+    plan.episode.join(format!("{}.episode-data.md", plan.base))
+}
+
+fn record_repair_field(plan: &RepairPlan, label: &str, value: &str, outcome: &mut Outcome) {
+    let Ok(mut document) = Document::read(&repair_metadata_path(plan)) else {
+        return;
+    };
+    let section = (label == "Uploaded").then_some("Thumbnail");
+    if let Ok(Some(_)) = document.set_field(label, section, value, true)
+        && document.write().is_ok()
+    {
+        outcome.recorded.push(label.to_owned());
+    }
+}
+
+fn record_repair_playlist(
+    plan: &RepairPlan,
+    playlist: &str,
+    timestamp: &str,
+    outcome: &mut Outcome,
+) {
+    let Ok(mut document) = Document::read(&repair_metadata_path(plan)) else {
+        return;
+    };
+    if let Ok(Some(_)) = document.mark_playlist(playlist, Some(&format!("Added {timestamp}")))
+        && document.write().is_ok()
+    {
+        outcome.recorded.push(format!("playlist {playlist}"));
+    }
 }
 
 impl Outcome {
@@ -579,6 +752,15 @@ mod tests {
         fn record(&self) -> String {
             std::fs::read_to_string(self.path.join(format!("{BASE}.episode-data.md"))).unwrap()
         }
+
+        fn mark_uploaded(&self) {
+            let path = self.path.join(format!("{BASE}.episode-data.md"));
+            let text = std::fs::read_to_string(&path).unwrap().replace(
+                "- **Video ID**: [To be added]",
+                "- **Video ID**: existing-video",
+            );
+            std::fs::write(path, text).unwrap();
+        }
     }
 
     fn config() -> ChannelConfig {
@@ -606,6 +788,11 @@ mod tests {
         assert_eq!(plan.request.tags.len(), 4);
         // The upload master is preferred over the edited one.
         assert!(plan.request.file.ends_with(format!("{BASE}.processed.mp4")));
+        assert!(
+            plan.request
+                .session_file
+                .ends_with(format!(".{BASE}.youtube-upload-session"))
+        );
     }
 
     #[test]
@@ -646,6 +833,73 @@ mod tests {
         assert!(record.contains("- **Privacy Status**: unlisted"));
         assert!(record.contains(&format!("- **Uploaded File**: `{BASE}.processed.mp4`")));
         assert!(record.contains("Human prose that must survive."));
+    }
+
+    #[test]
+    fn captions_can_be_repaired_and_are_recorded_only_after_read_back() {
+        let episode = Episode::ready();
+        episode.mark_uploaded();
+        let plan = plan_repair(&episode.path, &config(), RepairKind::Captions).unwrap();
+        let destination = FakeDestination::default();
+
+        let outcome = apply_repair(&destination, &plan, "2026-08-07T09:00:00Z").unwrap();
+
+        assert!(outcome.failed.is_empty());
+        assert!(
+            outcome
+                .confirmed
+                .iter()
+                .any(|item| item.contains("captions"))
+        );
+        assert!(
+            episode
+                .record()
+                .contains("- **Captions**: uploaded 2026-08-07")
+        );
+    }
+
+    #[test]
+    fn a_playlist_repair_is_verified_before_its_checkbox_is_ticked() {
+        let episode = Episode::ready();
+        episode.mark_uploaded();
+        let plan = plan_repair(
+            &episode.path,
+            &config(),
+            RepairKind::Playlist(PLAYLIST.to_owned()),
+        )
+        .unwrap();
+        let destination = FakeDestination::default();
+
+        let outcome = apply_repair(&destination, &plan, "2026-08-07T09:00:00Z").unwrap();
+
+        assert!(outcome.failed.is_empty());
+        assert!(
+            episode
+                .record()
+                .contains(&format!("- [x] Every episode ({PLAYLIST}) - Added"))
+        );
+    }
+
+    #[test]
+    fn thumbnail_repair_records_that_api_acceptance_cannot_be_verified() {
+        let episode = Episode::ready();
+        episode.mark_uploaded();
+        let plan = plan_repair(&episode.path, &config(), RepairKind::Thumbnail).unwrap();
+
+        let outcome =
+            apply_repair(&FakeDestination::default(), &plan, "2026-08-07T09:00:00Z").unwrap();
+
+        assert!(outcome.failed.is_empty());
+        assert!(
+            outcome
+                .confirmed
+                .contains(&"thumbnail (unverified)".to_owned())
+        );
+        assert!(
+            episode
+                .record()
+                .contains("2026-08-07T09:00:00Z (unverified)")
+        );
     }
 
     #[test]

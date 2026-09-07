@@ -14,7 +14,7 @@ use google_youtube3::api::{
 };
 use google_youtube3::common::Body;
 use google_youtube3::{YouTube, hyper_rustls, hyper_util, yup_oauth2};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 type Client = google_youtube3::YouTube<
@@ -24,6 +24,57 @@ type Client = google_youtube3::YouTube<
 pub struct YouTubeApi {
     runtime: Runtime,
     hub: Client,
+}
+
+struct UploadSession {
+    path: PathBuf,
+}
+
+impl UploadSession {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn save(&self, url: &str) -> Result<()> {
+        let temporary = self.path.with_extension("session.tmp");
+        std::fs::write(&temporary, url)
+            .with_context(|| format!("could not write upload session {}", temporary.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
+        }
+        std::fs::rename(&temporary, &self.path)
+            .with_context(|| format!("could not save upload session {}", self.path.display()))
+    }
+
+    fn clear(&self) -> Result<()> {
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error)
+                .with_context(|| format!("could not clear upload session {}", self.path.display())),
+        }
+    }
+}
+
+impl google_youtube3::common::Delegate for UploadSession {
+    fn upload_url(&mut self) -> Option<String> {
+        std::fs::read_to_string(&self.path)
+            .ok()
+            .map(|url| url.trim().to_owned())
+            .filter(|url| !url.is_empty())
+    }
+
+    fn store_upload_url(&mut self, url: Option<&str>) {
+        let result = match url {
+            Some(url) => self.save(url),
+            None => self.clear(),
+        };
+        if let Err(error) = result {
+            eprintln!("warning: {error:#}");
+        }
+    }
 }
 
 impl YouTubeApi {
@@ -163,12 +214,14 @@ impl Destination for YouTubeApi {
             ..Video::default()
         };
 
+        let mut session = UploadSession::new(request.session_file.clone());
         let (_, uploaded) = self
             .runtime
             .block_on(
                 self.hub
                     .videos()
                     .insert(video)
+                    .delegate(&mut session)
                     .upload_resumable(file, "video/*".parse().expect("a valid MIME type")),
             )
             .context("the upload failed")?;
@@ -274,4 +327,47 @@ pub fn validate_privacy(value: &str) -> Result<()> {
         bail!("privacy must be private, unlisted, or public, got '{value}'");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use google_youtube3::common::Delegate;
+
+    #[test]
+    fn upload_sessions_survive_an_interrupted_invocation_and_clear_on_success() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".episode.youtube-upload-session");
+        let mut first = UploadSession::new(path.clone());
+
+        first.store_upload_url(Some("https://upload.example/session-123"));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "https://upload.example/session-123"
+        );
+
+        let mut next = UploadSession::new(path.clone());
+        assert_eq!(
+            next.upload_url().as_deref(),
+            Some("https://upload.example/session-123")
+        );
+        next.store_upload_url(None);
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upload_session_is_private_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("session");
+        let session = UploadSession::new(path.clone());
+        session.save("opaque-url").unwrap();
+
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
 }

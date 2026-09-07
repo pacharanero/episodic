@@ -37,6 +37,8 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   `eps thumbnail compose` overlays the caption and emits both the upload PNG and an editable SVG companion referencing the frame by relative path. Both must exist for the pair to count as done, so a half-finished pair is retried rather than mistaken for success. Canvas size, font, point size, fill, stroke, uppercasing, and quoting all come from `[thumbnail]`. Verified pixel-identical to the shell implementation on the same input.
 
+  The parent workspace's `s/process` now composes these focused commands with `eps metadata chapters|tags|quote`, using JSON output to carry each canonical path into the next step. Its compatibility fixture proves the six-step order and the clean `<base>` naming when the source is `<base>.processed.mp4`.
+
 - [~] **R9 - Port generated metadata commands.** `eps metadata chapters|tags|quote|description|social` generate through a provider-neutral adapter, and `eps metadata check` validates an existing artefact without calling a model.
 
   Generation, validation, and retry are one operation: nothing is written until an attempt satisfies its task contract, and a run that cannot produce a valid answer in three attempts fails loudly rather than writing the last bad one. Rejected attempts are reported even when a later one succeeds, so a model that is drifting is visible. An empty response is a failure, not an artefact. An existing artefact is never regenerated without `--force`, which protects human edits.
@@ -47,24 +49,24 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   Remaining: `provider = "cli"` is the only implemented transport. Native provider routing follows the same path as D8.
 
-- [~] **R10 - Implement YouTube planning, upload, verification, and reconciliation.** `eps youtube plan-upload|upload|verify|publish` talk to the Data API through `google-youtube3` (D8). Authentication reuses the workspace's existing refresh token through the authorised-user flow, so no browser and no `yutu` are involved; a token with no refresh token is refused with an explanation rather than an obscure failure.
+- [x] **R10 - Implement YouTube planning, upload, verification, and reconciliation.** `eps youtube plan-upload|upload|verify|publish|captions|thumbnail|playlist` talk to the Data API through `google-youtube3` (D8). Authentication reuses the workspace's existing refresh token through the authorised-user flow, so no browser and no `yutu` are involved; a token with no refresh token is refused with an explanation rather than an obscure failure.
 
   Command logic depends on a `Destination` trait rather than on the API client, so planning, applying, verifying, and recording are all tested against an in-memory fake. The API implementation is the only code that talks to Google, and the async runtime is contained inside it: `eps` is a one-shot process with nothing to overlap, so the rest of the engine stays synchronous.
 
-  Uploads use the resumable endpoint, default to unlisted, and require `--apply`; making a video public is a separate command. The video ID is written to the record the moment the upload returns, before anything else is attempted, because everything after that can be retried and an unrecorded ID cannot be recovered. Nothing else is recorded until the destination confirms it: a playlist only where YouTube reports the video in it, captions only where YouTube reports tracks, and the thumbnail, which cannot be read back, labelled unverified.
+  Uploads use the resumable endpoint, default to unlisted, and require `--apply`; making a video public is a separate command. The opaque resumable-session URL is kept in an owner-readable hidden episode file, reused automatically by the next invocation after interruption, and removed after successful completion. The video ID is written to the record the moment the upload returns, before anything else is attempted, because everything after that can be retried and an unrecorded ID cannot be recovered. Nothing else is recorded until the destination confirms it: a playlist only where YouTube reports the video in it, captions only where YouTube reports tracks, and the thumbnail, which cannot be read back, labelled unverified.
 
   Verified against the live API: reading a published episode returned its privacy, caption count, and playlist membership, and reconciliation correctly reported an episode whose record says unlisted while YouTube says public.
 
-  Remaining: retrying an interrupted resumable upload from the command line, and a `captions`/`thumbnail`/`playlist` command for fixing up an episode that is already uploaded.
+  Standalone caption, thumbnail, and playlist commands repair an already uploaded episode. They plan without contacting YouTube unless `--apply` is present, verify captions and playlist membership before recording them, and label thumbnail API acceptance as unverified because the API cannot read the thumbnail back.
 
-- [ ] **R11 - Implement social planning, posting, and verification.** Keep drafting separate from posting and record confirmed destination URLs.
+  The parent workspace's `s/upload` now invokes this native adapter directly, including mandatory Binge Watch membership and operator-selected topic playlists. The old `yutu` finalisation path remains available only as a compatibility fallback while the new route completes real-episode acceptance.
+
 - [ ] **R12 - Implement retention audit and guarded cleanup.** Preserve exact upload sources and quarantine selected candidates before deletion.
 
 ## Additional Surfaces
 
 - [ ] **R13 - Establish one command registry and JSON schemas.** Drive CLI discovery, templates, MCP tools, and GUI operations from the same typed definitions.
 - [ ] **R14 - Implement `eps mcp`.** Expose read-only and planning operations normally; require explicit apply fields for mutations.
-- [ ] **R15 - Implement the local GUI.** Reuse the engine, command plans, safety policy, and filesystem watcher; do not create a second backend or database.
 - [ ] **R16 - Add Everything Discourse as the second real channel.** Deferred: work on that channel has not started (D6), and its configuration must not be invented ahead of a real episode. Until then, channel neutrality is defended by the D2 distribution boundary and the D4 core/integration split rather than by a second live channel.
 
 ## Distribution

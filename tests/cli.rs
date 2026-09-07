@@ -325,7 +325,7 @@ fn publication_updates_touch_only_their_own_lines() {
     // The manual studio steps use the same checkbox syntax and must be untouched.
     for untouched in [
         "- [ ] Verify license is \"Creative Commons - Attribution\"",
-        "- [ ] More options > Remixing > \"Don't allow remixing\"",
+        "- [x] Remixing allowed (channel-wide policy; supports Shorts and publicity)",
         "- [ ] Content declaration > \"No\" to altered content",
         "- [ ] Audio-Only Podcast Version (PLfixtureaudio) - add manually in YouTube Studio",
         "- [x] EVERYTHING Fixture Channel - BINGE WATCH (PLfixturebinge) - Added 2026-07-29T10:00:00Z",
@@ -1262,7 +1262,7 @@ fn completions_generate_for_supported_shells() {
 }
 
 /// A workspace laid out the way a real channel workspace is: a channel config
-/// under `channels/`, with episodes resolved relative to the workspace root.
+/// under `channels/<id>/`, with episodes resolved relative to the workspace root.
 struct Workspace {
     _temp: TempDir,
     root: PathBuf,
@@ -1273,8 +1273,8 @@ impl Workspace {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
-        fs::create_dir_all(root.join("channels")).unwrap();
-        let config = root.join("channels/fixture-channel.toml");
+        fs::create_dir_all(root.join("channels/fixture-channel")).unwrap();
+        let config = root.join("channels/fixture-channel/channel.toml");
         fs::write(
             &config,
             r#"
