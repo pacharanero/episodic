@@ -21,7 +21,7 @@ The original documents remain in place while current `edh-*` scripts operate. A 
 |---|---|---|
 | `README.md` | Project purpose, lifecycle concepts, local-state invariant | EDH commands, paths, credentials, social destinations, retention values |
 | `AGENTS.md` | Core invariants and validation workflow | EDH workspace instructions and current compatibility commands |
-| `roadmap.md` | Product milestones in `roadmap.md` | EDH compatibility and cutover tracking remains in the parent workspace |
+| `spec/roadmap.md` | Product milestones in `roadmap.md` | EDH compatibility and cutover tracking remains in the parent workspace |
 | `spec/overview.md` | Lifecycle in `episode-lifecycle.md` | EDH's actual OBS, calendar, YouTube, publicity, and archive steps |
 | `spec/tooling.md` | Composition, atomicity, naming, artefacts, adapters | Current `edh-*` inventory, credentials, model choice, audio settings, and known upload gaps |
 | `spec/episode-metadata-contract.md` | Preservation and managed-state principles in `filesystem-state.md` | EDH-specific legacy fields remain compatibility fixtures |
@@ -38,13 +38,13 @@ The original documents remain in place while current `edh-*` scripts operate. A 
 | `design.md` | the EDH workspace `channels/everything-digital-health/docs/brand.md` |
 | `spec/recording-preflight.md` | the EDH workspace `channels/everything-digital-health/docs/recording-preflight.md` |
 | `vdo-ninja/vdo-ninja-setup.md` | EDH recording setup and channel configuration |
-| `youtube-automation-setup.md` | the EDH workspace `channels/everything-digital-health.toml` and publication policy |
+| `youtube-automation-setup.md` | the EDH workspace `channels/everything-digital-health/channel.toml` and publication policy |
 
 ## Live State, Not Product Documentation
 
 | Source group in parent workspace | Treatment |
 |---|---|
-| `queries.md` | Active decision register while this project remains nested. |
+| `spec/queries.md` | Active decision register while this project remains nested. |
 | `planned-episodes.md` | EDH editorial backlog; remains in the channel workspace. |
 | `episodes/index.md` | Generated EDH lifecycle index; remains in the channel workspace. |
 | `episodes/**/<base>.episode-data.md` | Live episode records; retain externally and copy only curated, redacted compatibility fixtures. |

@@ -34,11 +34,9 @@ eps transcript extract|transcribe
 eps metadata chapters|tags|description|social
 eps thumbnail frames|compose
 eps youtube plan-upload|upload|captions|thumbnail|playlist|publish|verify|reconcile
-eps social plan|post|verify
 eps cleanup plan|apply
 eps storage audit
 eps doctor
-eps gui
 eps mcp
 eps completions
 eps version
@@ -65,7 +63,6 @@ The initial implementation is a single package with a library and `eps` binary. 
 | LLM | Route named tasks to configured providers, apply bounded retries, and validate outputs before publication. |
 | Image | Invoke ImageMagick for frame and thumbnail operations. |
 | YouTube | Call the Data API through `google-youtube3` (D8), with resumable upload and direct OAuth refresh. |
-| Social | Invoke explicit platform APIs or controlled manual fallbacks. |
 
 Adapters must expose the command and version used, redact secrets, and return useful error context. Empty or malformed output is failure, not a completed artefact.
 
@@ -75,11 +72,11 @@ Adapters must expose the command and version used, redact secrets, and return us
 - Every local mutation supports `--dry-run` and emits the complete proposed plan.
 - Remote writes and destructive local actions additionally require `--apply`.
 - Upload defaults to unlisted. Making a video public is a distinct command.
-- Social drafting and social posting are distinct operations.
+- `eps metadata social` produces validated drafts; separate platform tools or MCP servers own social posting and verification.
 - Every remote action has an inspect or verify counterpart.
 - Cleanup first moves candidates into episode-local quarantine; permanent deletion is a separate future policy.
 - Credentials and sensitive values are never printed or stored in channel configuration.
 
 ## Future Surfaces
 
-`eps mcp` and `eps gui` must consume the same command registry, plans, schemas, and safety gates as the CLI. Neither may bypass `--apply` semantics or write episode files directly behind the engine's back.
+`eps mcp` must consume the same command registry, plans, schemas, and safety gates as the CLI. It may not bypass `--apply` semantics or write episode files directly behind the engine's back. Separate filesystem/frontmatter visualization tools may read lifecycle state without becoming part of the engine.

@@ -9,7 +9,7 @@ This file is the entry point for AI coding agents. Read it before changing anyth
 - [README.md](README.md) - project purpose and current setup.
 - [spec/README.md](spec/README.md) - specification index and reading order.
 - [spec/roadmap.md](spec/roadmap.md) - implementation status and next milestones.
-- [../queries.md](../queries.md) - decisions waiting for Marcus.
+- [../spec/queries.md](../spec/queries.md) - decisions waiting for Marcus.
 - `~/code/house-style/AGENTS.md` - cross-project engineering standards.
 
 ## Core Invariants

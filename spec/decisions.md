@@ -1,6 +1,6 @@
 # Decisions
 
-Resolved design decisions that are not obvious from the resulting code, with the reasoning that produced them. Decision codes match the query codes used in the parent EDH workspace `queries.md` and are stable. A decision is revisited by adding a new entry, not by silently editing an old one.
+Resolved design decisions that are not obvious from the resulting code, with the reasoning that produced them. Decision codes match the query codes used in the parent EDH workspace `spec/queries.md` and are stable. A decision is revisited by adding a new entry, not by silently editing an old one.
 
 ## D1 - Canonical episode format is deferred
 
@@ -64,4 +64,3 @@ Authentication is not a reason to keep it. The stored token is a plain OAuth2 to
 `google-youtube3` was chosen over a hand-written adapter to get schema regeneration and the wider API surface without further work, accepting that it brings tokio and hyper and therefore makes `eps` async. Binary size and the async runtime are acceptable costs.
 
 Consequences: R22 targets a native adapter rather than `yutu` orchestration, and its resumable upload path replaces the current all-or-nothing upload. Upstreaming the `yutu` patches leaves the critical path but stays worth doing for other users. The existing refresh token is reused; if the Google Cloud project is ever returned to Testing status, refresh tokens expire after seven days.
-

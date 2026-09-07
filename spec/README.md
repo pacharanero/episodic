@@ -12,7 +12,7 @@ This directory defines the channel-neutral behaviour of `episodic`. Channel iden
 6. [documentation-map.md](documentation-map.md) - classification of the source workspace documentation.
 7. [roadmap.md](roadmap.md) - implementation milestones and status.
 
-Resolved decisions live in [decisions.md](decisions.md), whose codes match the query codes used in the parent workspace. Questions still open are raised in the parent workspace [`queries.md`](../../queries.md) while the project remains nested there; when `episodic` moves to its own repository, open questions move with it into `spec/queries.md`.
+Resolved decisions live in [decisions.md](decisions.md), whose codes match the stable query codes. Questions still open are raised in the parent workspace [`spec/queries.md`](../../spec/queries.md).
 
 ## Normative Language
 
