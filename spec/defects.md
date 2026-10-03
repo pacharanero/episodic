@@ -18,7 +18,7 @@ What worked without incident, and is worth not regressing: `--dry-run` plans mat
 
 ## F1 - Remote verification does not tolerate eventual consistency
 
-- [ ] **Open.** Highest priority of these five.
+- [x] **Fixed.** Confirmation is polled over about a minute, and unconfirmed is now a third outcome distinct from failure.
 
 `youtube upload` and `youtube playlist` write successfully, then immediately read back to confirm. The YouTube Data API is eventually consistent, so the read can return stale state and the command reports failure for work that in fact succeeded.
 
@@ -45,6 +45,12 @@ Consequences today:
 - Repeated false negatives train the operator to disbelieve real ones.
 
 Suggested fix: bounded retry with backoff before declaring failure - poll confirmation a few times over roughly 30-60 seconds. Distinguish three outcomes rather than two: confirmed, not yet confirmed within the window (exit zero, record nothing, say plainly that it is unconfirmed and how to re-check), and positively contradicted by the destination (a real failure). Only the third should be a nonzero exit.
+
+Fixed as suggested, with one correction to the three-outcome split. "Positively contradicted by the destination" turns out not to be observable: under eventual consistency a read that reports nothing, and a read that fails, say exactly the same thing, which is that the destination has not caught up. Absence is never proof. So the real distinction is between a *write* that returned an error, which is a genuine failure, and a *read* that has not yet confirmed, which is not. A read-back error is therefore unconfirmed rather than failed, which is the one place the implementation is deliberately more conservative than the suggestion.
+
+`Confirmation` polls six times over about sixty seconds, backing off 2-4-8-16-30, comfortably longer than the 30-45 seconds observed. `Outcome` carries an `unconfirmed` list alongside `confirmed` and `failed`; nothing unconfirmed is recorded, `is_complete` ignores it, and the text output says plainly that the steps were sent, are not visible yet, and should be re-checked with `eps youtube verify` before anything is retried.
+
+Tests inject a zero-wait `Confirmation` with the same attempt count as production, and the fake destination can report the pre-write state for a given number of reads, so both the observed case (confirmed after propagation) and the exhausted window are covered without waiting.
 
 Reproduction: upload any episode with captions and a thumbnail using `youtube upload --apply`, then run `youtube verify` after 30 seconds.
 
@@ -137,7 +143,7 @@ Fixed as suggested. Both members are now staged before either is published, beca
 
 ## F5 - `episode mark-playlist` depends on state that a failed step would have written
 
-- [ ] **Open.**
+- [x] **Fixed.** The unticked row is written at the point of the API call, so the repair path always has a line to tick.
 
 `mark-playlist` requires the playlist to be present in the record already:
 
@@ -150,6 +156,12 @@ This is correct on its own terms - R6 deliberately errors on an unknown playlist
 The operator is left editing the Markdown by hand, which is precisely what these commands exist to avoid.
 
 Fixing F1 removes the common trigger. Worth considering independently: when `youtube playlist --apply` targets a playlist named in channel configuration, it could add the entry to the record unticked at the point of the API call, leaving `mark-playlist` free to tick it once confirmed. That keeps the invariant that only confirmed facts are ticked, while ensuring the row the repair path needs exists.
+
+Both were done. The independent fix is `Document::add_playlist`, called immediately after a successful `playlistItem insert` in both the upload and repair paths, and applied to any playlist rather than only configured ones: a topic playlist is the case that has no row, so restricting it to configured ones would fix nothing. The row is written unticked and only `mark_playlist` ever ticks, so R10's invariant holds - the row records that the playlist was asked for, not that the destination confirmed it.
+
+Where `episode new` left a `[TBD]` checkbox, it is filled rather than left beside the real entry; otherwise the row joins the others rather than landing at the end of the section. A record that cannot be read, or has no playlist section, is not treated as an upload failure: the API call already succeeded, and the row is a convenience for recording rather than a fact about the destination.
+
+`mark_playlist` still refuses to invent a line, which remains right when an operator names a playlist by hand.
 
 Reproduction: add a video to a topic playlist that is not yet listed in the episode record, then attempt `episode mark-playlist`.
 

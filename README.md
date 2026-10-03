@@ -6,7 +6,7 @@ The filesystem is the source of truth. Episode state, channel policy, generated 
 
 ## Status
 
-Early, but a real episode can now be produced with it. `eps` creates and lists episodes, moves them between lifecycle stages, processes audio, transcribes, generates chapters, tags, descriptions, quotes and social drafts, extracts frames, composes thumbnails, and makes targeted lossless edits to the episode record. Its native YouTube adapter plans, uploads, verifies, publishes, and repairs captions, thumbnails, and playlist membership through `google-youtube3`; it does not require `yutu`. Remote writes require `--apply`, and making a video public is a separate action.
+Early, but a real episode can now be produced with it. `eps` creates and lists episodes, moves them between lifecycle stages, processes audio, transcribes, generates chapters, tags, descriptions, quotes and social drafts, extracts frames, composes thumbnails, and makes targeted lossless edits to the episode record. Its native YouTube adapter plans, uploads, verifies, publishes, and repairs captions, thumbnails, and playlist membership through `google-youtube3`; it does not require `yutu`. Remote writes require `--apply`, and making a video public is a separate action. Nothing is recorded that the destination has not confirmed, and because the Data API is eventually consistent, confirmation is polled for about a minute: work that has not appeared by then is reported as unconfirmed rather than failed, records nothing, and exits zero.
 
 New episodes are built entirely from channel configuration, so adding a channel is a TOML file rather than a code change.
 

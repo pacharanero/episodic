@@ -403,6 +403,72 @@ impl Document {
         }))
     }
 
+    /// Add an unticked playlist entry, so a later confirmation has a row to
+    /// tick.
+    ///
+    /// `mark_playlist` deliberately refuses to invent a line, which is right
+    /// when the operator names a playlist by hand. But a topic playlist is
+    /// only ever known at the point the API call is made, so without this the
+    /// row never exists and the entry can never be recorded at all (F5).
+    ///
+    /// Unticked is the whole point: the row says this playlist was asked for,
+    /// not that the destination confirmed it. Only `mark_playlist` ticks.
+    pub fn add_playlist(&mut self, playlist: &str, label: &str) -> Result<Option<Change>> {
+        let info = self.structure();
+        let (_, body) = self.locate_section(PLAYLIST_HEADINGS, &info)?;
+
+        let checkboxes = body
+            .clone()
+            .filter(|index| !info[*index].fenced && checkbox(&self.lines[*index].text).is_some())
+            .collect::<Vec<_>>();
+        if checkboxes
+            .iter()
+            .any(|index| self.lines[*index].text.contains(playlist))
+        {
+            return Ok(None);
+        }
+
+        let text = format!("- [ ] {label} ({playlist})");
+        // The skeleton leaves a `[TBD]` checkbox for exactly this, so fill it
+        // rather than leaving a placeholder next to a real entry.
+        let placeholder = checkboxes.iter().copied().find(|index| {
+            let line = self.lines[*index].text.trim_end();
+            line.ends_with("[TBD]") || line.ends_with(PLACEHOLDER)
+        });
+
+        let (line, from) = match placeholder {
+            Some(index) => {
+                let from = self.lines[index].text.clone();
+                self.lines[index].text = text.clone();
+                (index + 1, from)
+            }
+            None => {
+                let at = checkboxes.last().map_or(body.end, |index| index + 1);
+                let terminator = self
+                    .lines
+                    .get(at.saturating_sub(1))
+                    .filter(|line| !line.terminator.is_empty())
+                    .map_or("\n".to_owned(), |line| line.terminator.clone());
+                self.lines.insert(
+                    at,
+                    Line {
+                        text: text.clone(),
+                        terminator,
+                    },
+                );
+                (at + 1, String::new())
+            }
+        };
+
+        Ok(Some(Change {
+            section: Some(PLAYLIST_HEADINGS[0].to_owned()),
+            label: playlist.to_owned(),
+            from,
+            to: text,
+            line,
+        }))
+    }
+
     /// Replace the generated tag list.
     ///
     /// Most documents keep tags in a fenced block, a few keep them as bare
@@ -611,6 +677,9 @@ impl Document {
 /// Both spellings occur in real documents: the planner writes the first, the
 /// publication tooling has written the second.
 const PLAYLIST_HEADINGS: &[&str] = &["Playlists to Add", "Playlists Added To"];
+/// The skeleton's unfilled-value marker, recognised so a generated
+/// placeholder is filled rather than left beside a real entry.
+const PLACEHOLDER: &str = "[To be added]";
 const MANUAL_STEPS_HEADING: &str = "Manual YouTube Studio Steps";
 const TAG_COUNT_LABEL: &str = "**Tag character count**:";
 const TAG_LIMIT: usize = 500;
@@ -940,6 +1009,69 @@ Human notes.
         let source = PUBLICATION.replace("### Playlists to Add", "### Playlists Added To");
         let mut doc = document(&source);
         assert!(doc.mark_playlist("PLsafety", None).unwrap().is_some());
+    }
+
+    #[test]
+    fn adds_an_unticked_row_for_a_playlist_the_record_does_not_list() {
+        let mut doc = document(PUBLICATION);
+        let change = doc
+            .add_playlist("PLtopic", "Topic playlist")
+            .unwrap()
+            .unwrap();
+        assert_eq!(change.to, "- [ ] Topic playlist (PLtopic)");
+        assert_eq!(change.from, "", "an added row replaces nothing");
+
+        let rendered = doc.render();
+        assert!(
+            rendered.contains(
+                "- [ ] Audio-Only Podcast Version - add manually in YouTube Studio\n- [ ] Topic playlist (PLtopic)\n"
+            ),
+            "the row belongs with the others, not at the end of the section: {rendered}"
+        );
+        // Unticked is the point: the row says it was asked for, not confirmed.
+        assert!(!rendered.contains("- [x] Topic playlist"));
+        assert!(rendered.contains("- [x] Binge Watch (PLbinge) - Added 2026-03-16T18:35:13Z"));
+        assert!(rendered.contains("Human notes."));
+    }
+
+    #[test]
+    fn a_generated_placeholder_is_filled_rather_than_left_beside_a_real_entry() {
+        // The shape `episode new` writes: a `[TBD]` checkbox awaiting the
+        // topic playlist that is only known when the upload runs.
+        let source = PUBLICATION.replace(
+            "- [ ] Audio-Only Podcast Version - add manually in YouTube Studio\n",
+            "- [ ] Audio-Only Podcast Version - add manually in YouTube Studio\n\nTopic-specific (relevant to this episode):\n\n- [ ] [TBD]\n",
+        );
+        let mut doc = document(&source);
+        let change = doc
+            .add_playlist("PLtopic", "Topic playlist")
+            .unwrap()
+            .unwrap();
+        assert_eq!(change.from, "- [ ] [TBD]");
+
+        let rendered = doc.render();
+        assert!(rendered.contains("- [ ] Topic playlist (PLtopic)"));
+        assert!(!rendered.contains("[TBD]"), "the placeholder must be used");
+        assert_eq!(
+            rendered.matches("Topic playlist").count(),
+            1,
+            "filling must not also append"
+        );
+    }
+
+    #[test]
+    fn adding_a_playlist_already_listed_changes_nothing() {
+        let mut doc = document(PUBLICATION);
+        // Ticked and unticked existing entries are both already present.
+        for playlist in ["PLbinge", "PLsafety"] {
+            assert!(
+                doc.add_playlist(playlist, "Topic playlist")
+                    .unwrap()
+                    .is_none(),
+                "{playlist} is already listed"
+            );
+        }
+        assert_eq!(doc.render(), PUBLICATION);
     }
 
     #[test]

@@ -95,13 +95,16 @@ pub fn upload(
 
     eprintln!("Uploading {} ...", plan.request.file.display());
     let destination = connect(config_path)?;
-    let outcome = publish::apply(&destination, &plan, &now())?;
+    let outcome = publish::apply(
+        &destination,
+        &plan,
+        &now(),
+        &publish::Confirmation::default(),
+    )?;
     let complete = outcome.is_complete();
     output::write(format, &outcome, &outcome.as_text())?;
     if !complete {
-        bail!(
-            "some steps could not be confirmed; the video ID is recorded, so they can be retried"
-        );
+        bail!("some steps failed; the video ID is recorded, so they can be retried");
     }
     Ok(())
 }
@@ -138,11 +141,16 @@ pub fn repair(
     }
 
     let destination = connect(config_path)?;
-    let outcome = publish::apply_repair(&destination, &plan, &now())?;
-    let complete = outcome.failed.is_empty();
+    let outcome = publish::apply_repair(
+        &destination,
+        &plan,
+        &now(),
+        &publish::Confirmation::default(),
+    )?;
+    let failed = !outcome.failed.is_empty();
     output::write(format, &outcome, &outcome.as_text())?;
-    if !complete {
-        bail!("the repair could not be confirmed");
+    if failed {
+        bail!("the repair failed");
     }
     Ok(())
 }

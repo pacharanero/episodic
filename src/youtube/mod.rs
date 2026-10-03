@@ -65,7 +65,7 @@ pub trait Destination {
 pub mod fake {
     use super::*;
     use std::cell::RefCell;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     /// An in-memory destination for testing command behaviour.
     #[derive(Default)]
@@ -76,6 +76,9 @@ pub mod fake {
         pub thumbnails: RefCell<Vec<String>>,
         /// Operations that should fail, by name.
         pub failing: BTreeSet<String>,
+        /// Reads of a given operation that report the state from before the
+        /// write, so eventual consistency can be exercised.
+        pub stale_reads: RefCell<BTreeMap<String, u32>>,
         pub next_id: RefCell<u32>,
     }
 
@@ -86,11 +89,34 @@ pub mod fake {
             }
             Ok(())
         }
+
+        /// Whether this read should still report the pre-write state.
+        fn stale(&self, operation: &str) -> bool {
+            let mut remaining = self.stale_reads.borrow_mut();
+            match remaining.get_mut(operation) {
+                Some(reads) if *reads > 0 => {
+                    *reads -= 1;
+                    true
+                }
+                _ => false,
+            }
+        }
+
+        /// Report the pre-write state for the first `reads` reads of an
+        /// operation, as the Data API does while a write propagates.
+        pub fn lag(&self, operation: &str, reads: u32) {
+            self.stale_reads
+                .borrow_mut()
+                .insert(operation.to_owned(), reads);
+        }
     }
 
     impl Destination for FakeDestination {
         fn video(&self, id: &str) -> Result<Option<VideoState>> {
             self.guard("video")?;
+            if self.stale("video") {
+                return Ok(None);
+            }
             Ok(self
                 .videos
                 .borrow()
@@ -101,6 +127,9 @@ pub mod fake {
 
         fn caption_count(&self, video_id: &str) -> Result<usize> {
             self.guard("caption_count")?;
+            if self.stale("caption_count") {
+                return Ok(0);
+            }
             Ok(self
                 .captions
                 .borrow()
@@ -111,6 +140,9 @@ pub mod fake {
 
         fn playlist_contains(&self, playlist_id: &str, video_id: &str) -> Result<bool> {
             self.guard("playlist_contains")?;
+            if self.stale("playlist_contains") {
+                return Ok(false);
+            }
             Ok(self
                 .playlists
                 .borrow()
