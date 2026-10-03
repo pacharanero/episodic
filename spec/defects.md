@@ -104,7 +104,7 @@ Reproduction: transcribe any episode with more than about 30 seconds of silence 
 
 ## F4 - `thumbnail compose` has no `--force` and silently no-ops
 
-- [ ] **Open.** Small.
+- [x] **Fixed.** `--force` recomposes over a finished pair, matching `TaskArgs`.
 
 Recomposing a thumbnail with a different frame or caption does nothing if the output already exists:
 
@@ -116,6 +116,8 @@ Already done: <base>.thumbnail.png, <base>.thumbnail.svg
 The message is accurate but the command is one an operator will repeatedly want to re-run, since choosing a frame and a caption is iterative by nature. The `metadata` tasks already carry `--force` for exactly this; `thumbnail compose` does not, so the only route is deleting the PNG and the SVG by hand.
 
 Suggested fix: add `--force` to `thumbnail compose`, matching `TaskArgs`. Note that two files must be removed, so operators working around it will miss the SVG.
+
+Fixed as suggested. Both members are now staged before either is published, because recomposing over a finished pair could otherwise replace the SVG and then fail to replace the PNG, leaving a pair that looks complete but whose caption and image disagree. That window did not matter while the only reachable case was composing from nothing.
 
 ---
 

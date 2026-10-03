@@ -1253,7 +1253,122 @@ fn composing_reports_a_missing_font_rather_than_a_broken_thumbnail() {
             .unwrap()
             .contains("font not found")
     );
-    assert!(!workspace.root.join("frame.thumbnail.png").exists());
+    // Named after the episode directory rather than the frame, so look for any
+    // member of the pair rather than one guessed name.
+    assert!(
+        fs::read_dir(&workspace.root)
+            .unwrap()
+            .flatten()
+            .all(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                !name.ends_with(".thumbnail.png") && !name.ends_with(".thumbnail.svg")
+            }),
+        "a missing font must leave no thumbnail behind"
+    );
+}
+
+/// Choosing a frame and a caption is iterative, so recomposing must be
+/// possible without deleting the pair by hand. The SVG is the one operators
+/// miss, so it has to be replaced too.
+#[test]
+fn recomposing_a_thumbnail_needs_force_and_replaces_both_members() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let font = workspace.root.join("fonts/Font.ttf");
+    fs::create_dir_all(font.parent().unwrap()).unwrap();
+    fs::write(&font, "font").unwrap();
+    let image = workspace.root.join("frame.jpg");
+    fs::write(&image, "image").unwrap();
+
+    let mut config = fs::read_to_string(&workspace.config).unwrap();
+    config.push_str("\n[thumbnail]\nwidth = 1280\nheight = 720\nfont_path = \"fonts/Font.ttf\"\n");
+    fs::write(&workspace.config, config).unwrap();
+
+    // Renders the caption into the tile, then carries the tile through the
+    // composite, so the finished PNG records which caption produced it.
+    let magick = fake(
+        &tools,
+        "magick",
+        r#"
+caption=""
+tile=""
+for argument in "$@"; do
+  case "$argument" in
+    caption:*) caption="${argument#caption:}" ;;
+    *caption*) [ -f "$argument" ] && tile="$argument" ;;
+  esac
+done
+if [ -n "$caption" ]; then
+  printf '%s' "$caption" > "${!#}"
+elif [ -n "$tile" ]; then
+  cat "$tile" > "${!#}"
+else
+  printf 'composite' > "${!#}"
+fi
+"#,
+    );
+
+    let png = workspace.root.join("episode.thumbnail.png");
+    let svg = workspace.root.join("episode.thumbnail.svg");
+
+    let compose = |caption: &str, force: bool| {
+        let mut command = cargo_bin_cmd!("eps");
+        command
+            .arg("--config")
+            .arg(&workspace.config)
+            .args(["thumbnail", "compose", image.to_str().unwrap(), caption])
+            .arg("--output")
+            .arg(&png);
+        if force {
+            command.arg("--force");
+        }
+        command
+            .env("EPISODIC_MAGICK_BIN", &magick)
+            .current_dir(&workspace.root)
+            .output()
+            .unwrap()
+    };
+
+    let first = compose("first caption", false);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(fs::read_to_string(&png).unwrap().contains("FIRST CAPTION"));
+    assert!(fs::read_to_string(&svg).unwrap().contains("FIRST CAPTION"));
+
+    let repeated = compose("second caption", false);
+    assert!(repeated.status.success());
+    assert!(
+        fs::read_to_string(&png).unwrap().contains("FIRST CAPTION"),
+        "without --force a finished pair must be left alone"
+    );
+    assert!(
+        String::from_utf8_lossy(&repeated.stdout).contains("Already done"),
+        "the skip must say so: {}",
+        String::from_utf8_lossy(&repeated.stdout)
+    );
+
+    let forced = compose("second caption", true);
+    assert!(
+        forced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&forced.stderr)
+    );
+    assert!(fs::read_to_string(&png).unwrap().contains("SECOND CAPTION"));
+    assert!(
+        fs::read_to_string(&svg).unwrap().contains("SECOND CAPTION"),
+        "the SVG is the member operators forget to delete, so force must replace it"
+    );
+    assert!(
+        fs::read_dir(&workspace.root)
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().contains("staging")),
+        "no staging files may survive a successful recompose"
+    );
 }
 
 #[test]

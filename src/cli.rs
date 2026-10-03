@@ -5,6 +5,7 @@ use crate::channel;
 use crate::commands;
 use crate::output::OutputFormat;
 use crate::paths::tilde_pathbuf;
+use crate::thumbnail::ComposeRequest;
 use crate::youtube::publish;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
@@ -282,6 +283,10 @@ enum ThumbnailCommand {
         /// Do not wrap the caption in double quotes.
         #[arg(long)]
         no_quotes: bool,
+
+        /// Recompose even if the thumbnail already exists.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -585,15 +590,19 @@ pub fn run() -> Result<()> {
                     text,
                     output,
                     no_quotes,
+                    force,
                 }),
         }) => {
             let config = channel::resolve_path(cli.config.as_deref())?;
             commands::media::compose(
                 &config,
-                &image,
-                &text,
-                output.as_deref(),
-                no_quotes,
+                &ComposeRequest {
+                    image: &image,
+                    text: &text,
+                    output: output.as_deref(),
+                    no_quotes,
+                    force,
+                },
                 cli.dry_run,
                 cli.format,
             )

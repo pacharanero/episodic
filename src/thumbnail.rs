@@ -127,17 +127,33 @@ fn frames_directory(video: &Path) -> PathBuf {
         .join(format!("{base}.frames"))
 }
 
+/// What to compose, as asked for by the caller. Whether the caption is
+/// actually quoted is decided here against channel policy, not by the caller.
+#[derive(Debug)]
+pub struct ComposeRequest<'a> {
+    pub image: &'a Path,
+    pub text: &'a str,
+    pub output: Option<&'a Path>,
+    pub no_quotes: bool,
+    pub force: bool,
+}
+
 /// Overlay caption text on a frame, producing the upload PNG and an editable
 /// SVG companion.
 pub fn compose(
-    image: &Path,
-    text: &str,
-    output: Option<&Path>,
+    request: &ComposeRequest<'_>,
     policy: &ThumbnailPolicy,
     workspace_root: &Path,
-    quote: bool,
     dry_run: bool,
 ) -> Result<MediaOutcome> {
+    let ComposeRequest {
+        image,
+        text,
+        output,
+        no_quotes,
+        force,
+    } = *request;
+
     if !image.is_file() {
         bail!("input image not found: {}", image.display());
     }
@@ -167,7 +183,7 @@ pub fn compose(
     };
     let svg = png.with_extension("svg");
 
-    let quoted = if quote {
+    let quoted = if !no_quotes && policy.quote_by_default.unwrap_or(true) {
         format!("\"{text}\"")
     } else {
         text.to_owned()
@@ -215,8 +231,9 @@ pub fn compose(
     }
 
     // Both files must exist to count as done: the PNG alone would hide a
-    // half-finished pair that cannot be edited.
-    if non_empty(&png) && non_empty(&svg) {
+    // half-finished pair that cannot be edited. Choosing a frame and a caption
+    // is iterative, so `--force` recomposes over a finished pair.
+    if !force && non_empty(&png) && non_empty(&svg) {
         return Ok(MediaOutcome {
             input: image.to_path_buf(),
             outputs: vec![png, svg],
@@ -297,9 +314,26 @@ pub fn compose(
         );
     }
 
-    let svg_source = build_svg(image, &svg, &caption, policy, &colours);
-    fs::write(&svg, svg_source)?;
+    // Both members are staged before either is published. Recomposing over a
+    // finished pair would otherwise be able to replace the SVG and then fail
+    // to replace the PNG, leaving a pair that looks complete but whose caption
+    // and image disagree.
+    let staged_svg = directory.join(format!(
+        ".{}.staging.svg",
+        svg.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let staged = fs::write(
+        &staged_svg,
+        build_svg(image, &svg, &caption, policy, &colours),
+    );
+    if staged.is_err() {
+        let _ = fs::remove_file(&staged_png);
+        let _ = fs::remove_file(&staged_svg);
+    }
+    staged?;
+
     fs::rename(&staged_png, &png)?;
+    fs::rename(&staged_svg, &svg)?;
 
     Ok(MediaOutcome {
         input: image.to_path_buf(),
