@@ -15,7 +15,7 @@
 //! invented timestamps. Condensing into fixed-length blocks makes prompt size
 //! track episode duration rather than cue count, and fixed it reproducibly.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::fmt::Write as _;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -128,6 +128,138 @@ pub fn format_timestamp(seconds: f64) -> String {
     }
 }
 
+/// Longest cue text still treated as a candidate repeated filler phrase.
+const SHORT_CUE_CHARS: usize = 40;
+
+/// How many trailing cues start at or after the media duration.
+///
+/// A cue beginning after the file has ended cannot be describing anything in
+/// it, so this needs no further evidence. Cues are in file order, so the
+/// offenders are always a suffix.
+pub fn beyond_duration(cues: &[Cue], duration: f64) -> usize {
+    cues.iter()
+        .rev()
+        .take_while(|cue| cue.start >= duration)
+        .count()
+}
+
+/// How many trailing cues form a run of repeated short phrases.
+///
+/// Whisper's trailing-silence failure mode repeats a short phrase; the
+/// observed case was eight `Bye.` followed by two `Thank you.`. A cue joins
+/// the run only when it is short *and* identical to its neighbour on either
+/// side, so a single distinct closing sentence is never swept up.
+///
+/// This is suspicion, not proof: a phrase genuinely repeated on camera looks
+/// the same. The caller confirms the span is silent before removing anything.
+/// A run covering every cue is reported as no run at all, because an empty
+/// transcript is worse than a bad one and the two cases are indistinguishable
+/// from the text alone.
+pub fn repeated_tail(cues: &[Cue]) -> usize {
+    let mut count = 0;
+    for index in (0..cues.len()).rev() {
+        let text = cues[index].text.trim();
+        if text.chars().count() > SHORT_CUE_CHARS {
+            break;
+        }
+        let matches_before = index > 0 && cues[index - 1].text.trim() == text;
+        let matches_after = index + 1 < cues.len() && cues[index + 1].text.trim() == text;
+        if !matches_before && !matches_after {
+            break;
+        }
+        count += 1;
+    }
+    if count == cues.len() { 0 } else { count }
+}
+
+/// Keep the first `keep` cue blocks of an SRT or WebVTT document.
+///
+/// The kept bytes are preserved exactly, including the `WEBVTT` header and SRT
+/// cue numbering, which stays correct because only a suffix is removed.
+pub fn truncate_cue_blocks(text: &str, keep: usize) -> String {
+    let starts = cue_block_starts(text);
+    match starts.get(keep) {
+        None => text.to_owned(),
+        Some(&cut) => text[..cut].to_owned(),
+    }
+}
+
+/// Byte offsets where each cue block begins. Blocks are separated by blank
+/// lines; one without a timestamp line, such as the `WEBVTT` header, is not a
+/// cue block and so is never counted or cut.
+fn cue_block_starts(text: &str) -> Vec<usize> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    let mut block_start = 0;
+    let mut in_block = false;
+    let mut has_timestamp = false;
+
+    for line in text.split_inclusive('\n') {
+        if line.trim().is_empty() {
+            if in_block && has_timestamp {
+                starts.push(block_start);
+            }
+            in_block = false;
+            has_timestamp = false;
+        } else {
+            if !in_block {
+                block_start = offset;
+                in_block = true;
+            }
+            has_timestamp |= line.contains("-->");
+        }
+        offset += line.len();
+    }
+    if in_block && has_timestamp {
+        starts.push(block_start);
+    }
+    starts
+}
+
+/// Keep the first `keep` records of a line-per-cue document, after `header`
+/// leading lines. Whisper writes one line per segment to `.txt`, and a header
+/// plus one line per segment to `.tsv`.
+pub fn truncate_lines(text: &str, keep: usize, header: usize) -> String {
+    let mut result = String::new();
+    let mut records = 0;
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        if index >= header {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if records == keep {
+                break;
+            }
+            records += 1;
+        }
+        result.push_str(line);
+    }
+    result
+}
+
+/// Keep the first `keep` segments of Whisper's JSON, leaving every other
+/// field, including each segment's own extra fields, as Whisper wrote them.
+pub fn truncate_json(text: &str, keep: usize) -> Result<String> {
+    let mut document: serde_json::Value =
+        serde_json::from_str(text).context("whisper produced JSON that cannot be parsed")?;
+    let Some(segments) = document
+        .get_mut("segments")
+        .and_then(|value| value.as_array_mut())
+    else {
+        bail!("whisper JSON has no segments array");
+    };
+    segments.truncate(keep);
+    let joined = segments
+        .iter()
+        .filter_map(|segment| segment.get("text").and_then(|text| text.as_str()))
+        .collect::<Vec<_>>()
+        .join("");
+    if let Some(whole) = document.get_mut("text") {
+        *whole = serde_json::Value::String(joined);
+    }
+    serde_json::to_string(&document).context("could not rewrite whisper JSON")
+}
+
 /// Read and condense a transcript, returning the digest and its end time.
 pub fn digest(text: &str, block_seconds: f64) -> Result<(String, u64)> {
     if block_seconds <= 0.0 {
@@ -217,5 +349,126 @@ mod tests {
     fn refuses_input_that_is_not_a_transcript() {
         assert!(digest("just some prose", 30.0).is_err());
         assert!(digest(SAMPLE, 0.0).is_err());
+    }
+
+    /// The observed failure: ten trailing cues over a silent tail, the last
+    /// ending 29 seconds past the end of the media file.
+    fn hallucinated_tail() -> Vec<Cue> {
+        let mut cues = vec![Cue {
+            start: 1240.0,
+            end: 1244.74,
+            text: "and that is where the evidence runs out".to_owned(),
+        }];
+        for index in 0..8 {
+            let start = 1255.0 + f64::from(index) * 5.0;
+            cues.push(Cue {
+                start,
+                end: start + 5.0,
+                text: "Bye.".to_owned(),
+            });
+        }
+        cues.push(Cue {
+            start: 1295.0,
+            end: 1325.0,
+            text: "Thank you.".to_owned(),
+        });
+        cues.push(Cue {
+            start: 1305.88,
+            end: 1334.88,
+            text: "Thank you.".to_owned(),
+        });
+        cues
+    }
+
+    #[test]
+    fn counts_cues_that_begin_after_the_media_ends() {
+        assert_eq!(beyond_duration(&hallucinated_tail(), 1305.60), 1);
+        assert_eq!(beyond_duration(&parse(SAMPLE), 1305.60), 0);
+    }
+
+    #[test]
+    fn finds_the_repeated_run_but_not_the_last_real_sentence() {
+        let cues = hallucinated_tail();
+        assert_eq!(repeated_tail(&cues), 10);
+        assert_eq!(
+            cues[cues.len() - 11].text,
+            "and that is where the evidence runs out",
+            "the run must stop at real speech"
+        );
+    }
+
+    #[test]
+    fn a_single_distinct_closing_cue_is_not_a_repeated_run() {
+        let mut cues = parse(SAMPLE);
+        cues.push(Cue {
+            start: 120.0,
+            end: 122.0,
+            text: "Thanks for watching.".to_owned(),
+        });
+        assert_eq!(repeated_tail(&cues), 0);
+    }
+
+    #[test]
+    fn a_transcript_that_is_entirely_repeats_is_left_alone() {
+        // Indistinguishable from a legitimately repetitive clip, and an empty
+        // transcript is worse than a suspicious one.
+        let cues = vec![
+            Cue {
+                start: 0.0,
+                end: 1.0,
+                text: "Bye.".to_owned(),
+            },
+            Cue {
+                start: 1.0,
+                end: 2.0,
+                text: "Bye.".to_owned(),
+            },
+        ];
+        assert_eq!(repeated_tail(&cues), 0);
+    }
+
+    #[test]
+    fn truncating_srt_keeps_numbering_and_exact_bytes() {
+        let kept = truncate_cue_blocks(SAMPLE, 2);
+        assert_eq!(
+            kept,
+            "1\n00:00:00,000 --> 00:00:04,000\nHello and welcome\n\n2\n00:00:05,000 --> 00:00:09,500\nto the show\n\n"
+        );
+        assert!(SAMPLE.starts_with(&kept), "kept bytes must be unchanged");
+        assert_eq!(truncate_cue_blocks(SAMPLE, 9), SAMPLE);
+    }
+
+    #[test]
+    fn truncating_vtt_preserves_the_header() {
+        let vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:04.000\nHello\n\n00:00:05.000 --> 00:00:09.500\nthere\n\n";
+        let kept = truncate_cue_blocks(vtt, 1);
+        assert!(kept.starts_with("WEBVTT\n\n"));
+        assert!(!kept.contains("there"));
+    }
+
+    #[test]
+    fn truncating_lines_respects_a_header() {
+        let tsv = "start\tend\ttext\n0\t4000\tHello\n5000\t9500\tthere\n";
+        assert_eq!(
+            truncate_lines(tsv, 1, 1),
+            "start\tend\ttext\n0\t4000\tHello\n"
+        );
+        assert_eq!(truncate_lines("Hello\nthere\n", 1, 0), "Hello\n");
+    }
+
+    #[test]
+    fn truncating_json_keeps_whisper_fields_and_rebuilds_the_whole_text() {
+        let json = r#"{"text":" Hello there","segments":[{"id":0,"seek":0,"start":0.0,"end":4.0,"text":" Hello","tokens":[1,2]},{"id":1,"seek":0,"start":5.0,"end":9.5,"text":" there","tokens":[3]}],"language":"en"}"#;
+        let kept: serde_json::Value =
+            serde_json::from_str(&truncate_json(json, 1).unwrap()).unwrap();
+        assert_eq!(kept["text"], " Hello");
+        assert_eq!(kept["language"], "en");
+        assert_eq!(kept["segments"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            kept["segments"][0]["tokens"],
+            serde_json::json!([1, 2]),
+            "per-segment extras must survive"
+        );
+        assert!(truncate_json("not json", 1).is_err());
     }
 }

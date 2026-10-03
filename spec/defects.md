@@ -90,7 +90,7 @@ Reproduction: run the three commands above on any episode, then `episode validat
 
 ## F3 - Transcripts are not clamped to media duration, so trailing hallucinations survive
 
-- [ ] **Open.**
+- [x] **Fixed.** Cues beyond the media are dropped outright; repeated cues are dropped once the audio under them measures silent.
 
 Whisper emitted ten trailing cues over the silent tail of the episode, the last of them ending 29 seconds after the end of the media file.
 
@@ -103,6 +103,14 @@ This is a well-known Whisper failure mode on trailing silence, not a fault in th
 Cleaned by hand in the session across all five formats (233 -> 223 cues), after which chapters were regenerated from the corrected transcript.
 
 Suggested fix: after transcription, drop cues starting at or after media duration, and trim a trailing run of short repeated identical cues whose span is silent. Report what was removed on stderr rather than doing it silently. Media duration is already available via ffprobe, which `doctor` confirms is present.
+
+Fixed as suggested, with the two kinds of removal held to different standards of proof. A cue starting at or after the media duration cannot describe anything in the file, so it goes on arithmetic alone. A trailing run of repeated short phrases is only suspicion - the same text over real audio is someone saying it twice - so it is removed only once `volumedetect` measures its span at or below -60 dBFS. Where the audio is audible, or where the measurement cannot be taken, the cues are kept and the doubt is reported. A run covering every cue is treated as no run, because an empty transcript is worse than a suspicious one and the two cases cannot be told apart from the text.
+
+Three further choices worth recording:
+
+- **The whole family is corrected together.** Five transcripts disagreeing about where the episode ends would be worse than one that is too long. The correction happens while the family is still staged, so one that cannot be corrected consistently is never published at all.
+- **Kept bytes are preserved.** Only a suffix is removed, so SRT numbering stays correct, the `WEBVTT` header survives, and Whisper's per-segment JSON fields are left as written rather than regenerated.
+- **A failed measurement publishes rather than discards.** Transcription costs minutes to tens of minutes. Throwing away a finished transcript because a duration probe failed would be worse than publishing it unclamped with the limitation stated.
 
 Reproduction: transcribe any episode with more than about 30 seconds of silence or an end card after the last speech.
 

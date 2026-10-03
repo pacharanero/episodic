@@ -793,6 +793,7 @@ if [ "$1" = "-v" ] && [ -n "$EPISODIC_TEST_PROBE_FAILS" ] && [[ "$target" == *st
 fi
 case " $* " in
   *" stream=codec_type "*) echo "$EPISODIC_TEST_STREAMS" ;;
+  *" format=duration "*) echo "${EPISODIC_TEST_DURATION:-1305.6}" ;;
 esac
 [ -s "$target" ] || exit 1
 "#;
@@ -1016,12 +1017,14 @@ printf '1\n00:00:00,000 --> 00:00:01,000\nhello\n' > "$out/$stem.srt"
 for extension in vtt txt json tsv; do printf 'content\n' > "$out/$stem.$extension"; done
 "#,
     );
+    let ffprobe = fake(&tools, "ffprobe", FAKE_FFPROBE);
 
     let output = cargo_bin_cmd!("eps")
         .arg("--config")
         .arg(&workspace.config)
         .args(["transcript", "transcribe", input.to_str().unwrap()])
         .env("EPISODIC_WHISPER_BIN", &whisper)
+        .env("EPISODIC_FFPROBE_BIN", &ffprobe)
         .current_dir(&workspace.root)
         .output()
         .unwrap();
@@ -1047,6 +1050,238 @@ for extension in vtt txt json tsv; do printf 'content\n' > "$out/$stem.$extensio
             "episode.processed.{extension} must not be published"
         );
     }
+}
+
+/// Whisper's trailing-silence failure mode, as observed: a real closing
+/// sentence, then eight `Bye.` and two `Thank you.` over a silent tail, the
+/// last ending 29 seconds past the end of the media (F3).
+struct HallucinatedTranscript {
+    _temp: TempDir,
+    source: PathBuf,
+}
+
+impl HallucinatedTranscript {
+    const CUES: usize = 11;
+    const DURATION: f64 = 1305.6;
+
+    fn new() -> Self {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().to_path_buf();
+        let mut cues = vec![(
+            1240.0,
+            1244.74,
+            "and that is where the evidence runs out".to_owned(),
+        )];
+        for index in 0..8 {
+            let start = 1255.0 + f64::from(index) * 5.0;
+            cues.push((start, start + 5.0, "Bye.".to_owned()));
+        }
+        cues.push((1295.0, 1325.0, "Thank you.".to_owned()));
+        cues.push((1305.88, 1334.88, "Thank you.".to_owned()));
+        assert_eq!(cues.len(), Self::CUES);
+
+        let stamp = |seconds: f64, fraction: char| {
+            let millis = (seconds * 1000.0).round() as u64;
+            format!(
+                "{:02}:{:02}:{:02}{fraction}{:03}",
+                millis / 3_600_000,
+                millis / 60_000 % 60,
+                millis / 1000 % 60,
+                millis % 1000
+            )
+        };
+
+        let mut srt = String::new();
+        let mut vtt = "WEBVTT\n\n".to_owned();
+        let mut txt = String::new();
+        let mut tsv = "start\tend\ttext\n".to_owned();
+        let mut segments = Vec::new();
+        for (index, (start, end, text)) in cues.iter().enumerate() {
+            srt.push_str(&format!(
+                "{}\n{} --> {}\n{text}\n\n",
+                index + 1,
+                stamp(*start, ','),
+                stamp(*end, ',')
+            ));
+            vtt.push_str(&format!(
+                "{} --> {}\n{text}\n\n",
+                stamp(*start, '.'),
+                stamp(*end, '.')
+            ));
+            txt.push_str(&format!("{text}\n"));
+            tsv.push_str(&format!(
+                "{}\t{}\t{text}\n",
+                (start * 1000.0) as u64,
+                (end * 1000.0) as u64
+            ));
+            segments.push(serde_json::json!({
+                "id": index,
+                "start": start,
+                "end": end,
+                "text": format!(" {text}"),
+                "tokens": [index],
+            }));
+        }
+        let json = serde_json::json!({
+            "text": segments.iter().filter_map(|s| s["text"].as_str()).collect::<String>(),
+            "segments": segments,
+            "language": "en",
+        });
+
+        fs::write(source.join("transcript.srt"), srt).unwrap();
+        fs::write(source.join("transcript.vtt"), vtt).unwrap();
+        fs::write(source.join("transcript.txt"), txt).unwrap();
+        fs::write(source.join("transcript.tsv"), tsv).unwrap();
+        fs::write(
+            source.join("transcript.json"),
+            serde_json::to_string(&json).unwrap(),
+        )
+        .unwrap();
+
+        Self {
+            _temp: temp,
+            source,
+        }
+    }
+}
+
+/// Copies a prepared family into Whisper's output directory.
+const FAKE_WHISPER_COPY: &str = r#"
+input="$1"
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--output_dir" ]; then out="$2"; fi
+  shift
+done
+stem="$(basename "$input")"
+stem="${stem%.*}"
+for extension in srt vtt txt json tsv; do
+  cp "$EPISODIC_TEST_TRANSCRIPT/transcript.$extension" "$out/$stem.$extension"
+done
+"#;
+
+/// Reports a peak level when asked to measure, and writes to its output
+/// otherwise.
+const FAKE_FFMPEG_VOLUME: &str = r#"
+case " $* " in
+  *volumedetect*)
+    echo "[Parsed_volumedetect_0 @ 0x0] max_volume: ${EPISODIC_TEST_PEAK:--91.0} dB" >&2
+    exit 0 ;;
+esac
+printf 'media' > "${!#}"
+"#;
+
+fn transcribe_hallucinated(peak: &str) -> (TempDir, PathBuf, std::process::Output) {
+    let transcript = HallucinatedTranscript::new();
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().to_path_buf();
+    fs::write(
+        root.join("eps.toml"),
+        "[channel]\nid = \"c\"\nname = \"C\"\ntimezone = \"Europe/London\"\n",
+    )
+    .unwrap();
+    let tools = root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let input = root.join("episode.wav");
+    fs::write(&input, "audio").unwrap();
+
+    let output = cargo_bin_cmd!("eps")
+        .args(["transcript", "transcribe", input.to_str().unwrap()])
+        .env(
+            "EPISODIC_WHISPER_BIN",
+            fake(&tools, "whisper", FAKE_WHISPER_COPY),
+        )
+        .env(
+            "EPISODIC_FFPROBE_BIN",
+            fake(&tools, "ffprobe", FAKE_FFPROBE),
+        )
+        .env(
+            "EPISODIC_FFMPEG_BIN",
+            fake(&tools, "ffmpeg", FAKE_FFMPEG_VOLUME),
+        )
+        .env("EPISODIC_TEST_TRANSCRIPT", &transcript.source)
+        .env(
+            "EPISODIC_TEST_DURATION",
+            HallucinatedTranscript::DURATION.to_string(),
+        )
+        .env("EPISODIC_TEST_PEAK", peak)
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    (temp, root, output)
+}
+
+#[test]
+fn hallucinated_cues_over_a_silent_tail_are_removed_from_every_format() {
+    let (_temp, root, output) = transcribe_hallucinated("-91.0");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let srt = fs::read_to_string(root.join("episode.srt")).unwrap();
+    assert!(
+        srt.contains("and that is where the evidence runs out"),
+        "real speech must survive"
+    );
+    assert!(!srt.contains("Bye."), "repeats over silence must go: {srt}");
+    assert!(!srt.contains("Thank you."));
+
+    // Five transcripts that disagree about where the episode ends would be
+    // worse than one that is too long, so every format is corrected together.
+    let vtt = fs::read_to_string(root.join("episode.vtt")).unwrap();
+    assert!(vtt.starts_with("WEBVTT"));
+    assert!(!vtt.contains("Bye."));
+    assert_eq!(
+        fs::read_to_string(root.join("episode.txt")).unwrap(),
+        "and that is where the evidence runs out\n"
+    );
+    let tsv = fs::read_to_string(root.join("episode.tsv")).unwrap();
+    assert!(tsv.starts_with("start\tend\ttext\n"));
+    assert_eq!(tsv.lines().count(), 2, "header plus the one real cue");
+    let json: Value =
+        serde_json::from_str(&fs::read_to_string(root.join("episode.json")).unwrap()).unwrap();
+    assert_eq!(json["segments"].as_array().unwrap().len(), 1);
+    assert_eq!(json["language"], "en");
+    assert_eq!(json["text"], " and that is where the evidence runs out");
+
+    // Removing published state silently would be worse than leaving it.
+    let reported = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        reported.contains("removed 10 of 11 cues") && reported.contains("over silence"),
+        "what was removed must be reported: {reported}"
+    );
+}
+
+#[test]
+fn repeated_cues_over_real_audio_are_kept_and_the_doubt_reported() {
+    // The same text over audible speech is someone actually saying it twice,
+    // so only the cue beyond the end of the media may be removed.
+    let (_temp, root, output) = transcribe_hallucinated("-14.2");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let srt = fs::read_to_string(root.join("episode.srt")).unwrap();
+    assert_eq!(
+        srt.matches("Bye.").count(),
+        8,
+        "repeats over real audio must be kept"
+    );
+    assert_eq!(
+        srt.matches("Thank you.").count(),
+        1,
+        "only the cue starting past the end of the media goes"
+    );
+    let reported = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        reported.contains("not silent") && reported.contains("starting after the end of the media"),
+        "the doubt must be reported: {reported}"
+    );
 }
 
 #[test]

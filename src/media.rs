@@ -12,6 +12,7 @@
 use crate::channel::AudioPolicy;
 use crate::paths;
 use crate::tool::Tool;
+use crate::transcript;
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::fs;
@@ -154,19 +155,7 @@ impl Media {
 
     /// Container duration in seconds.
     pub fn duration_seconds(&self, path: &Path) -> Result<f64> {
-        let output = self.ffprobe.run(&[
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=nw=1:nk=1",
-            &path.display().to_string(),
-        ])?;
-        String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse::<f64>()
-            .with_context(|| format!("could not read duration of {}", path.display()))
+        duration_seconds(&self.ffprobe, path)
     }
 
     /// The command line a render would run, for dry-run output.
@@ -596,6 +585,14 @@ pub fn transcribe(
             bail!("whisper did not produce a non-empty {extension} transcript");
         }
     }
+
+    // Clamped while still staged, so a family that cannot be corrected
+    // consistently is never published at all.
+    let clamped = clamp_transcript(staging.path(), &whisper_base, input)?;
+    if let Some(report) = &clamped {
+        eprintln!("Transcript: {report}");
+    }
+
     for extension in TRANSCRIPT_EXTENSIONS {
         fs::rename(
             staging.path().join(format!("{whisper_base}.{extension}")),
@@ -603,16 +600,121 @@ pub fn transcribe(
         )?;
     }
 
+    let mut detail = format!("model {model}, language {language}, device {device}");
+    if let Some(report) = clamped {
+        detail.push_str("; ");
+        detail.push_str(&report);
+    }
     Ok(MediaOutcome {
         input: input.to_path_buf(),
         outputs,
         commands: Vec::new(),
         applied: true,
         skipped: false,
-        detail: Some(format!(
-            "model {model}, language {language}, device {device}"
-        )),
+        detail: Some(detail),
     })
+}
+
+/// Any span peaking at or below this is silence for these purposes. Digital
+/// silence measures about -91 dBFS; speech, even quiet speech, is far above.
+const SILENCE_PEAK_DBFS: f64 = -60.0;
+
+/// Drop cues a staged transcript should never publish.
+///
+/// Two kinds. A cue starting at or after the media duration cannot describe
+/// anything in the file, which needs no further evidence. A trailing run of
+/// repeated short phrases is Whisper's well-known failure mode on trailing
+/// silence, which is only removed once the audio under it measures silent:
+/// the same text over real audio is someone actually saying it twice.
+///
+/// Returns what was removed, for reporting. The whole family is rewritten
+/// together, because five transcripts that disagree about where the episode
+/// ends are worse than one that is too long.
+fn clamp_transcript(staging: &Path, base: &str, input: &Path) -> Result<Option<String>> {
+    let srt_path = staging.join(format!("{base}.srt"));
+    let srt = fs::read_to_string(&srt_path)?;
+    let cues = transcript::parse(&srt);
+    if cues.is_empty() {
+        return Ok(None);
+    }
+
+    // Transcription costs minutes to tens of minutes, so a failed measurement
+    // must not discard a finished transcript. The limitation is reported and
+    // the family is published unclamped; only a correction that cannot be
+    // applied consistently across all five formats aborts the publish.
+    let duration =
+        match Tool::find("ffprobe", &[]).and_then(|ffprobe| duration_seconds(&ffprobe, input)) {
+            Ok(duration) => duration,
+            Err(error) => {
+                return Ok(Some(format!(
+                    "published unchecked: could not read the media duration ({error:#})"
+                )));
+            }
+        };
+
+    let beyond = transcript::beyond_duration(&cues, duration);
+    let suspected = transcript::repeated_tail(&cues);
+    let mut notes = Vec::new();
+
+    let mut drop = beyond;
+    if beyond > 0 {
+        notes.push(format!(
+            "{beyond} cue(s) starting after the end of the media ({})",
+            transcript::format_timestamp(duration)
+        ));
+    }
+
+    if suspected > beyond {
+        let run = &cues[cues.len() - suspected..];
+        let from = run[0].start;
+        let to = run
+            .iter()
+            .map(|cue| cue.end)
+            .fold(0.0, f64::max)
+            .min(duration);
+        match Tool::find("ffmpeg", &[]).and_then(|ffmpeg| span_peak_dbfs(&ffmpeg, input, from, to))
+        {
+            Ok(peak) if peak <= SILENCE_PEAK_DBFS => {
+                drop = suspected;
+                notes.push(format!(
+                    "{suspected} repeated cue(s) from {} over silence ({peak:.1} dBFS peak)",
+                    transcript::format_timestamp(from)
+                ));
+            }
+            Ok(peak) => notes.push(format!(
+                "kept {suspected} repeated cue(s) from {}: the audio under them is not silent ({peak:.1} dBFS peak)",
+                transcript::format_timestamp(from)
+            )),
+            Err(error) => notes.push(format!(
+                "kept {suspected} repeated cue(s) from {}: could not confirm silence ({error:#})",
+                transcript::format_timestamp(from)
+            )),
+        }
+    }
+
+    if drop == 0 {
+        return Ok((!notes.is_empty()).then(|| notes.join("; ")));
+    }
+
+    let keep = cues.len() - drop;
+    fs::write(&srt_path, transcript::truncate_cue_blocks(&srt, keep))?;
+    let vtt_path = staging.join(format!("{base}.vtt"));
+    let vtt = fs::read_to_string(&vtt_path)?;
+    fs::write(&vtt_path, transcript::truncate_cue_blocks(&vtt, keep))?;
+    for (extension, header) in [("txt", 0), ("tsv", 1)] {
+        let path = staging.join(format!("{base}.{extension}"));
+        let text = fs::read_to_string(&path)?;
+        fs::write(&path, transcript::truncate_lines(&text, keep, header))?;
+    }
+    let json_path = staging.join(format!("{base}.json"));
+    let json = fs::read_to_string(&json_path)?;
+    fs::write(&json_path, transcript::truncate_json(&json, keep)?)?;
+
+    Ok(Some(format!(
+        "removed {drop} of {} cues: {}",
+        cues.len(),
+        notes.join("; ")
+    )))
 }
 
 fn skipped(input: &Path, output: PathBuf) -> MediaOutcome {
@@ -624,6 +726,54 @@ fn skipped(input: &Path, output: PathBuf) -> MediaOutcome {
         skipped: true,
         detail: None,
     }
+}
+
+/// Container duration in seconds, given an already-resolved ffprobe.
+fn duration_seconds(ffprobe: &Tool, path: &Path) -> Result<f64> {
+    let output = ffprobe.run(&[
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=nw=1:nk=1",
+        &path.display().to_string(),
+    ])?;
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<f64>()
+        .with_context(|| format!("could not read duration of {}", path.display()))
+}
+
+/// Peak level of one span of audio, in dBFS.
+///
+/// Used to confirm that a suspected run of hallucinated cues really does sit
+/// over silence before any of them is removed.
+fn span_peak_dbfs(ffmpeg: &Tool, input: &Path, start: f64, end: f64) -> Result<f64> {
+    let output = ffmpeg.run(&[
+        "-hide_banner".to_owned(),
+        "-nostats".to_owned(),
+        "-i".to_owned(),
+        input.display().to_string(),
+        "-ss".to_owned(),
+        format!("{start:.3}"),
+        "-to".to_owned(),
+        format!("{end:.3}"),
+        "-af".to_owned(),
+        "volumedetect".to_owned(),
+        "-f".to_owned(),
+        "null".to_owned(),
+        "-".to_owned(),
+    ])?;
+    let log = String::from_utf8_lossy(&output.stderr);
+    let reported = log
+        .split("max_volume:")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .context("ffmpeg did not report a peak level")?;
+    reported
+        .parse::<f64>()
+        .with_context(|| format!("ffmpeg reported a peak of '{reported}', which is not a number"))
 }
 
 /// The last JSON object in a log, which is where loudnorm prints its report.
