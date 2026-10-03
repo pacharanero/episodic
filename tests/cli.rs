@@ -871,6 +871,184 @@ fn a_failing_tool_leaves_no_artefact_behind() {
     assert!(!workspace.root.join("episode.wav").exists());
 }
 
+/// The documented pipeline runs on the processed master, so every later
+/// artefact used to inherit a `.processed` infix that `episode validate` and
+/// the YouTube caption lookup did not expect. A full run must produce the
+/// names the artefact contract declares (F2).
+#[test]
+fn the_documented_pipeline_produces_the_names_the_contract_declares() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let base = "2026.09.15-naming";
+    let episode = workspace.root.join("episodes/in-progress").join(base);
+    fs::create_dir_all(&episode).unwrap();
+    fs::write(
+        episode.join(format!("{base}.episode-data.md")),
+        format!("# Episode Data: Naming\n\n## Episode Details\n\n- **Episode Date**: 2026-09-15\n- **Title**: Naming\n- **Video ID**: [TBD]\n\n## Files\n\n- **Edited Master**: `{base}.mp4`\n"),
+    )
+    .unwrap();
+    let master = episode.join(format!("{base}.mp4"));
+    fs::write(&master, "edited master").unwrap();
+
+    // Writes to the last argument, and reports loudness when measuring.
+    let ffmpeg = fake(
+        &tools,
+        "ffmpeg",
+        r#"
+case " $* " in
+  *" -f null "*)
+    echo '{"input_i":"-19.0","input_tp":"-2.0","input_lra":"6.0","input_thresh":"-29.0"}' >&2
+    exit 0 ;;
+esac
+printf 'media' > "${!#}"
+"#,
+    );
+    let ffprobe = fake(&tools, "ffprobe", FAKE_FFPROBE);
+    let whisper = fake(
+        &tools,
+        "whisper",
+        r#"
+input="$1"
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--output_dir" ]; then out="$2"; fi
+  shift
+done
+stem="$(basename "$input")"
+stem="${stem%.*}"
+printf '1\n00:00:00,000 --> 00:00:10,000\nIntroduction\n' > "$out/$stem.srt"
+for extension in vtt txt json tsv; do printf 'content\n' > "$out/$stem.$extension"; done
+"#,
+    );
+
+    let run = |arguments: &[&str]| {
+        let output = cargo_bin_cmd!("eps")
+            .arg("--config")
+            .arg(&workspace.config)
+            .args(arguments)
+            .env("EPISODIC_FFMPEG_BIN", &ffmpeg)
+            .env("EPISODIC_FFPROBE_BIN", &ffprobe)
+            .env("EPISODIC_WHISPER_BIN", &whisper)
+            .env("EPISODIC_TEST_STREAMS", "video\naudio")
+            .current_dir(&workspace.root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{:?} failed: {}",
+            arguments,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+
+    let processed = episode.join(format!("{base}.processed.mp4"));
+    let wav = episode.join(format!("{base}.wav"));
+    run(&["audio", "process", master.to_str().unwrap()]);
+    assert!(processed.is_file(), "the upload master keeps its infix");
+    run(&["transcript", "extract", processed.to_str().unwrap()]);
+    assert!(
+        wav.is_file(),
+        "extracted audio is <base>.wav, not <base>.processed.wav"
+    );
+    run(&["transcript", "transcribe", wav.to_str().unwrap()]);
+
+    for extension in ["srt", "vtt", "txt", "json", "tsv"] {
+        assert!(
+            episode.join(format!("{base}.{extension}")).is_file(),
+            "the transcript family must be <base>.{extension}"
+        );
+    }
+    assert!(
+        fs::read_dir(&episode)
+            .unwrap()
+            .flatten()
+            .all(
+                |entry| entry.file_name().to_string_lossy() == format!("{base}.processed.mp4")
+                    || !entry.file_name().to_string_lossy().contains(".processed.")
+            ),
+        "only the upload master may carry the .processed infix"
+    );
+
+    // The real test of the naming: the validator has to find the captions.
+    let report = run(&[
+        "--format",
+        "json",
+        "episode",
+        "validate",
+        episode.to_str().unwrap(),
+    ]);
+    let report: Value = serde_json::from_slice(&report.stdout).unwrap();
+    let findings = report["findings"].as_array().unwrap();
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| finding["code"] == "missing-captions"),
+        "a complete pipeline run must not report missing captions: {findings:?}"
+    );
+}
+
+/// Transcribing the processed master directly must still publish the clean
+/// names, because the file is there to be transcribed and operators will
+/// reach for it.
+#[test]
+fn transcribing_the_processed_master_still_publishes_the_clean_family() {
+    let workspace = Workspace::new();
+    let tools = workspace.root.join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    let input = workspace.root.join("episode.processed.wav");
+    fs::write(&input, "audio").unwrap();
+
+    let whisper = fake(
+        &tools,
+        "whisper",
+        r#"
+input="$1"
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--output_dir" ]; then out="$2"; fi
+  shift
+done
+stem="$(basename "$input")"
+stem="${stem%.*}"
+printf '1\n00:00:00,000 --> 00:00:01,000\nhello\n' > "$out/$stem.srt"
+for extension in vtt txt json tsv; do printf 'content\n' > "$out/$stem.$extension"; done
+"#,
+    );
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args(["transcript", "transcribe", input.to_str().unwrap()])
+        .env("EPISODIC_WHISPER_BIN", &whisper)
+        .current_dir(&workspace.root)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for extension in ["srt", "vtt", "txt", "json", "tsv"] {
+        assert!(
+            workspace
+                .root
+                .join(format!("episode.{extension}"))
+                .is_file(),
+            "expected episode.{extension}"
+        );
+        assert!(
+            !workspace
+                .root
+                .join(format!("episode.processed.{extension}"))
+                .exists(),
+            "episode.processed.{extension} must not be published"
+        );
+    }
+}
+
 #[test]
 fn a_partial_transcript_family_is_never_published() {
     let workspace = Workspace::new();

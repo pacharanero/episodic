@@ -10,6 +10,7 @@
 //! that later steps will treat as finished work.
 
 use crate::channel::AudioPolicy;
+use crate::paths;
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -231,7 +232,7 @@ impl Media {
     ) -> Result<MediaOutcome> {
         let output = match output {
             Some(path) => path.to_path_buf(),
-            None => with_extension(input, "wav"),
+            None => paths::artefact(input, "wav"),
         };
         let rate = policy.transcription_sample_rate.to_string();
         let arguments = vec![
@@ -535,7 +536,11 @@ pub fn transcribe(
     }
     let whisper = Tool::find("whisper", &[workspace_root.join("venv/bin/whisper")])?;
     let directory = output_dir.map_or_else(|| parent_of(input), Path::to_path_buf);
-    let base = stem_of(input);
+    // Whisper names its output after the input file, but the published family
+    // takes the episode basename. The two differ whenever the input carries
+    // processed audio, which is the only input that should be transcribed.
+    let whisper_base = stem_of(input);
+    let base = paths::episode_base(input);
     let outputs = TRANSCRIPT_EXTENSIONS
         .iter()
         .map(|extension| directory.join(format!("{base}.{extension}")))
@@ -586,14 +591,14 @@ pub fn transcribe(
     whisper.run_attached(&arguments)?;
 
     for extension in TRANSCRIPT_EXTENSIONS {
-        let produced = staging.path().join(format!("{base}.{extension}"));
+        let produced = staging.path().join(format!("{whisper_base}.{extension}"));
         if !produced.metadata().is_ok_and(|metadata| metadata.len() > 0) {
             bail!("whisper did not produce a non-empty {extension} transcript");
         }
     }
     for extension in TRANSCRIPT_EXTENSIONS {
         fs::rename(
-            staging.path().join(format!("{base}.{extension}")),
+            staging.path().join(format!("{whisper_base}.{extension}")),
             directory.join(format!("{base}.{extension}")),
         )?;
     }
@@ -652,18 +657,19 @@ fn extension_of(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn with_extension(input: &Path, extension: &str) -> PathBuf {
-    parent_of(input).join(format!("{}.{extension}", stem_of(input)))
-}
-
 /// `episode.mp4` becomes `episode.processed.mp4`, matching the artefact
 /// contract's name for the upload master.
+///
+/// Built from the episode basename rather than the input stem, so processing
+/// an already-processed master targets the same file and is skipped, instead
+/// of producing `episode.processed.processed.mp4`.
 fn processed_path(input: &Path) -> PathBuf {
     let extension = extension_of(input);
+    let base = paths::episode_base(input);
     parent_of(input).join(if extension.is_empty() {
-        format!("{}.processed", stem_of(input))
+        format!("{base}.processed")
     } else {
-        format!("{}.processed.{extension}", stem_of(input))
+        format!("{base}.processed.{extension}")
     })
 }
 
@@ -684,10 +690,11 @@ mod tests {
     }
 
     #[test]
-    fn names_the_transcription_track_beside_its_source() {
+    fn reprocessing_the_upload_master_targets_itself_rather_than_doubling_up() {
         assert_eq!(
-            with_extension(Path::new("/e/show.mp4"), "wav"),
-            PathBuf::from("/e/show.wav")
+            processed_path(Path::new("/e/2026.07.29-x.processed.mp4")),
+            PathBuf::from("/e/2026.07.29-x.processed.mp4"),
+            "so the readable-output check skips instead of writing a second infix"
         );
     }
 

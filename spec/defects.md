@@ -52,7 +52,7 @@ Reproduction: upload any episode with captions and a thumbnail using `youtube up
 
 ## F2 - The transcript family is named so that the validator cannot find it
 
-- [ ] **Open.**
+- [x] **Fixed.** Artefact naming is now derived in one place, which strips the `.processed` infix.
 
 The documented pipeline produces a captions file that `episode validate` reports as missing.
 
@@ -77,6 +77,12 @@ The existing channel archive uses `<base>.srt`, `<base>.wav` and so on with no `
 Worked around in the session by renaming the five transcript files plus the wav; validation then reported `Findings: none`.
 
 Suggested fix: strip a `.processed` infix when deriving the transcript basename, or give `transcript transcribe` an explicit basename option. Either way `episode validate` and the emitted filenames must be decided in one place, since today they disagree.
+
+Fixed by the first route, in one place: `paths::episode_base` derives the shared `<base>` and strips the infix, and `paths::artefact` names a sibling artefact from it. The [artefact contract](artefact-contract.md) already settled which names are canonical - extracted audio is `<base>.wav` and captions are `<base>.srt` - so the validator was right and the media commands were wrong.
+
+`transcript transcribe` now distinguishes the name Whisper writes, which follows its input, from the name the family is published under, so transcribing `<base>.processed.wav` directly still yields `<base>.srt`. `audio process` also derives from the shared base, so reprocessing the upload master skips rather than producing `<base>.processed.processed.mp4`.
+
+Nothing covered the pipeline end to end, which is how the disagreement survived. Two tests now do: one runs `audio process`, `transcript extract`, `transcript transcribe`, and `episode validate` in order and asserts the contract names and no `missing-captions` finding, and one transcribes the processed master directly. Both fail without the fix.
 
 Reproduction: run the three commands above on any episode, then `episode validate`.
 
