@@ -4,7 +4,7 @@
 # A complete, fictional example exercising every section `eps` understands.
 # Only [channel] is required. Copy the sections a real channel actually needs.
 # Production channel configuration lives in the channel's own workspace, never
-# in this repository.
+# in this repository. Use eps.toml at that workspace's root.
 
 [channel]
 id = "example-channel"
@@ -15,7 +15,7 @@ subject = "the subject matter this channel covers"
 voice = "UK English, first-person host voice, professional but direct, no emojis"
 
 [paths]
-# Resolved relative to the workspace root, not to this file.
+# Resolved relative to this file's parent directory.
 episodes = "episodes"
 
 # Provider-neutral model routing. Profiles name a way to reach a model; tasks

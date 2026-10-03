@@ -12,7 +12,7 @@ The original documents remain in place while current `edh-*` scripts operate. A 
 | `channels/README.md` | Generic configuration concepts belong in `../channels/README.md`; concrete EDH values remain channel-specific. |
 | `prompts/README.md` | Future contributor documentation for prompt contracts and overrides; not yet migrated because prompt execution has not moved. |
 | `prompts/chapters.md`, `bluesky-draft.md`, `mastodon-draft.md`, `linkedin-draft.md`, `instagram-caption.md` | Candidate default prompt contracts; migrate with the metadata command family. |
-| `spec/api-docs-youtube.md` | Future integration reference; `eps` will link to official YouTube and `yutu` docs rather than own a copied API guide. |
+| `spec/api-docs-youtube.md` | Historical integration reference; the native adapter uses `google-youtube3` and official YouTube API documentation, not `yutu` orchestration. |
 | `CLAUDE.md` | Replaced by the thin pointer in this project. |
 
 ## Mixed Sources Split By Boundary
@@ -44,7 +44,7 @@ The original documents remain in place while current `edh-*` scripts operate. A 
 
 | Source group in parent workspace | Treatment |
 |---|---|
-| `spec/queries.md` | Active decision register while this project remains nested. |
+| `spec/queries.md` | Historical EDH decision register. The engine is now standalone; local decisions and outstanding work live in `decisions.md` and `roadmap.md`. |
 | `planned-episodes.md` | EDH editorial backlog; remains in the channel workspace. |
 | `episodes/index.md` | Generated EDH lifecycle index; remains in the channel workspace. |
 | `episodes/**/<base>.episode-data.md` | Live episode records; retain externally and copy only curated, redacted compatibility fixtures. |
@@ -64,7 +64,7 @@ The original documents remain in place while current `edh-*` scripts operate. A 
 
 ## Nested `yutu` Documentation
 
-`yutu/README.md`, `yutu/docs/FEATURES.md`, and `yutu/skills/youtube/references/{setup,workflows}.md` define the external adapter's supported surface and remain owned by `yutu`. `episodic` should link to them and test required capabilities rather than copy them. `yutu`'s autonomous agent instruction prompts and SEO guide do not define `eps` behaviour and are not migrated.
+`yutu/README.md`, `yutu/docs/FEATURES.md`, and `yutu/skills/youtube/references/{setup,workflows}.md` remain owned by the external `yutu` project. They are historical channel-tooling references, not the contract for the native `eps` YouTube adapter (D8). Neither its autonomous agent prompts nor its SEO guide define `eps` behaviour or are migrated.
 
 ## Missing Or Stale References Found During Review
 

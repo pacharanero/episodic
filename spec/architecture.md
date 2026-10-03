@@ -18,14 +18,14 @@ The filesystem remains the source of truth. The core is reusable by the CLI, a f
 ## Non-Goals
 
 - A hosted service, SaaS product, central database, or remote control plane.
-- A replacement for a video editor, OBS, recording platform, FFmpeg, Whisper, ImageMagick, `yutu`, or a language-model provider.
+- A replacement for a video editor, OBS, recording platform, FFmpeg, Whisper, ImageMagick, or a language-model provider. YouTube operations use a native adapter rather than `yutu` orchestration.
 - Autonomous publication or social posting.
 - A separate command contract for CLI, GUI, and MCP.
 
 ## Command Shape
 
 ```text
-eps [--channel <id>] [--config <path>] [--format text|json|yaml] [--dry-run]
+eps [--config <path>] [--format text|json|yaml] [--dry-run]
 
 eps channel list|show|validate
 eps episode new|inspect|list|validate|promote
@@ -44,6 +44,14 @@ eps version
 
 Every command writes result data to stdout and progress, diagnostics, and errors to stderr. Text is the human default; JSON is the stable automation contract; YAML is a structured human-readable view. Bare `eps` and bare command families print useful help and exit successfully.
 
+This command map includes future surface: cleanup, storage audit, MCP, and a separate reconcile command are not implemented. Doctor provides local metadata-only prerequisite checks (R23). See the roadmap and live `eps --help` for status.
+
+## Configuration Selection
+
+One external channel workspace is selected per invocation: explicit `--config <path>` first, otherwise `eps.toml` in PWD only (D9). Relative selectors are PWD-relative. No ancestor traversal, global fallback, environment selector, channel registry, or directory-layout heuristic is permitted. Selection never falls through on a missing or invalid file. Normal loads parse and validate; diagnostic validation shares parsing and issue collection without calling the normal load recursively.
+
+Relative configuration assets resolve against the normalized absolute config parent, irrespective of its directory name. Explicit episode/media/output arguments remain PWD-relative. `channel list` reports a one-element list for the selected valid channel and fails on load errors; it does not scan for other channels.
+
 ## Engine Boundary
 
 The Rust library owns domain types, configuration loading, workspace discovery, legacy-state adapters, validation, plans, safety policy, artefact naming, and adapter interfaces. `main.rs` only performs startup handling and delegates to the library.
@@ -52,7 +60,7 @@ The initial implementation is a single package with a library and `eps` binary. 
 
 ## Distribution Boundary
 
-`episodic` is intended for publication as a general-purpose tool, so the repository carries no configuration, policy, or state belonging to a specific channel (D2). It contains the schema, a documented example configuration, and redacted conformance fixtures; production channel configuration and editorial policy live in each channel's own workspace. This holds while the project is still nested inside the EDH workspace, so extraction is a move rather than a cleanup.
+`episodic` is a standalone source repository for a general-purpose tool, so it carries no configuration, policy, or state belonging to a specific channel (D2, D9). It contains the schema, a documented example configuration, and redacted conformance fixtures; production channel configuration and editorial policy live in each channel's own external workspace. Compatibility scripts migrate separately and iteratively; the engine must not infer their former nested layout.
 
 ## Adapters
 

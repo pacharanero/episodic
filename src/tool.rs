@@ -29,10 +29,10 @@ impl Tool {
     /// how the Whisper virtualenv is found.
     pub fn find(name: &str, fallbacks: &[PathBuf]) -> Result<Self> {
         let variable = format!("EPISODIC_{}_BIN", name.to_uppercase().replace('-', "_"));
-        if let Ok(override_path) = std::env::var(&variable) {
+        if let Some(override_path) = std::env::var_os(&variable) {
             let path = PathBuf::from(&override_path);
             if !is_runnable(&path) {
-                bail!("{variable} is set to '{override_path}', which is not an executable file");
+                bail!("{variable} is set to a path which is not an executable file");
             }
             return Ok(Self {
                 name: name.to_owned(),

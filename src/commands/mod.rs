@@ -3,6 +3,7 @@
 
 pub mod channel;
 pub mod completions;
+pub mod doctor;
 pub mod episode;
 pub mod media;
 pub mod metadata;

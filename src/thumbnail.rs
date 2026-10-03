@@ -31,8 +31,12 @@ struct TextColours {
 
 /// ImageMagick 7 renamed the entry point; `convert` remains as a deprecated
 /// alias, so prefer `magick` and fall back for older installations.
-fn imagemagick() -> Result<Tool> {
-    Tool::find("magick", &[]).or_else(|_| Tool::find("convert", &[]))
+pub(crate) fn imagemagick() -> Result<Tool> {
+    let magick = Tool::find("magick", &[]);
+    if std::env::var_os("EPISODIC_MAGICK_BIN").is_some() {
+        return magick;
+    }
+    magick.or_else(|_| Tool::find("convert", &[]))
 }
 
 /// Extract evenly spaced interior frames for thumbnail selection.

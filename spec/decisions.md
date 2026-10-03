@@ -64,3 +64,11 @@ Authentication is not a reason to keep it. The stored token is a plain OAuth2 to
 `google-youtube3` was chosen over a hand-written adapter to get schema regeneration and the wider API surface without further work, accepting that it brings tokio and hyper and therefore makes `eps` async. Binary size and the async runtime are acceptable costs.
 
 Consequences: R22 targets a native adapter rather than `yutu` orchestration, and its resumable upload path replaces the current all-or-nothing upload. Upstreaming the `yutu` patches leaves the critical path but stays worth doing for other users. The existing refresh token is reused; if the Google Cloud project is ever returned to Testing status, refresh tokens expire after seven days.
+
+## D9 - Standalone source and explicit workspace selection
+
+Decided 2026-09-07. Extraction to a standalone repository is approved. The normal workflow is an installed `eps` invoked in a channel workspace containing `eps.toml`; elsewhere the caller supplies `--config`. Selection is explicit CLI path first, then PWD `eps.toml` only. Omit the unresolved `EPS_CONFIG` selector. No ancestor or global fallback, `--channel` selection, or nested-layout inference remains. This deliberately narrows the house-style discovery hierarchy to prevent accidentally selecting a different channel.
+
+Relative assets use the normalized absolute config parent, and every normal load runs semantic validation as well as strict TOML parsing. `channel list` represents the single selected workspace, not a multi-channel registry. Config-independent commands such as help, version, and explicit episode inspection need no workspace config.
+
+Migration is tolerant and iterative at the workflow and legacy-document boundary, not at the config validation boundary. Existing configs can be explicitly selected after their relative asset paths are adjusted; no automatic rewrite is added. External channel scripts and installation are separate work. Doctor, release automation, and clean-machine distribution remain future tasks. D8's native YouTube adapter is implemented as R10; its old R22 reference is historical, and `yutu` is not an engine dependency.

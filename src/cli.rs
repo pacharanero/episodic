@@ -22,11 +22,7 @@ use std::path::{Path, PathBuf};
     disable_help_subcommand = true
 )]
 pub struct Cli {
-    /// Channel ID when more than one config is available.
-    #[arg(long, global = true)]
-    channel: Option<String>,
-
-    /// Explicit channel configuration file.
+    /// Configuration file (defaults to eps.toml in the current directory).
     #[arg(
         long,
         global = true,
@@ -61,6 +57,8 @@ enum RootCommand {
     },
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
+    /// Check local workspace prerequisites without running tools or contacting services.
+    Doctor,
     /// Inspect and validate episode state.
     Episode {
         #[command(subcommand)]
@@ -316,17 +314,8 @@ struct MediaArgs {
 
 #[derive(Debug, Subcommand)]
 enum ChannelCommand {
-    /// List channel configs in a directory.
-    List {
-        /// Directory containing channel TOML files.
-        #[arg(
-            long,
-            default_value = "channels",
-            value_parser = tilde_pathbuf,
-            value_hint = ValueHint::DirPath
-        )]
-        directory: PathBuf,
-    },
+    /// List the single selected workspace channel.
+    List,
     /// Show the resolved channel configuration summary.
     Show,
     /// Validate the resolved channel configuration.
@@ -490,6 +479,7 @@ pub fn run() -> Result<()> {
     match cli.command {
         None => print_root_help(),
         Some(RootCommand::Version) => commands::version::run(cli.format),
+        Some(RootCommand::Doctor) => commands::doctor::run(cli.config.as_deref(), cli.format),
         Some(RootCommand::Completions(args)) => commands::completions::run(
             args.shell,
             args.directory.as_deref(),
@@ -500,13 +490,13 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Audio {
             command: Some(AudioCommand::Analyse { input }),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::media::analyse(&path, &input, cli.format)
         }
         Some(RootCommand::Audio {
             command: Some(AudioCommand::Process(args)),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::media::process(
                 &path,
                 &args.input,
@@ -519,14 +509,14 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Metadata {
             command: Some(command),
         }) => {
-            let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let config = channel::resolve_path(cli.config.as_deref())?;
             run_metadata(command, &config, cli.dry_run, cli.format)
         }
         Some(RootCommand::Youtube { command: None }) => print_family_help("youtube"),
         Some(RootCommand::Youtube {
             command: Some(command),
         }) => {
-            let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let config = channel::resolve_path(cli.config.as_deref())?;
             match command {
                 YoutubeCommand::PlanUpload(args) => commands::youtube::plan_upload(
                     &config,
@@ -597,7 +587,7 @@ pub fn run() -> Result<()> {
                     no_quotes,
                 }),
         }) => {
-            let config = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let config = channel::resolve_path(cli.config.as_deref())?;
             commands::media::compose(
                 &config,
                 &image,
@@ -612,7 +602,7 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Transcript {
             command: Some(TranscriptCommand::Extract(args)),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::media::extract(
                 &path,
                 &args.input,
@@ -624,7 +614,7 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Transcript {
             command: Some(TranscriptCommand::Transcribe { input, output_dir }),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::media::transcribe(
                 &path,
                 &input,
@@ -635,18 +625,21 @@ pub fn run() -> Result<()> {
         }
         Some(RootCommand::Channel { command: None }) => print_family_help("channel"),
         Some(RootCommand::Channel {
-            command: Some(ChannelCommand::List { directory }),
-        }) => commands::channel::list(&directory, cli.format),
+            command: Some(ChannelCommand::List),
+        }) => {
+            let path = channel::resolve_path(cli.config.as_deref())?;
+            commands::channel::list(&path, cli.format)
+        }
         Some(RootCommand::Channel {
             command: Some(ChannelCommand::Show),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::channel::show(&path, cli.format)
         }
         Some(RootCommand::Channel {
             command: Some(ChannelCommand::Validate),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::channel::validate(&path, cli.format)
         }
         Some(RootCommand::Episode { command: None }) => print_family_help("episode"),
@@ -700,7 +693,7 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Episode {
             command: Some(EpisodeCommand::New(args)),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::episode::new(
                 &path,
                 &args.date,
@@ -713,7 +706,7 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Episode {
             command: Some(EpisodeCommand::List { stage }),
         }) => {
-            let path = channel::resolve_path(cli.config.as_deref(), cli.channel.as_deref())?;
+            let path = channel::resolve_path(cli.config.as_deref())?;
             commands::episode::list(&path, stage.as_deref(), cli.format)
         }
         Some(RootCommand::Episode {

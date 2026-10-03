@@ -2,7 +2,15 @@
 
 Channel configuration contains identity and policy; the `episodic` engine contains workflow behaviour. Adding a channel must not require source-code branches.
 
-This repository holds the schema, [`example.toml`](example.toml), and redacted conformance fixtures only. Production channel configuration, editorial policy, credentials, and episode state live in each channel's own workspace and are never committed here, so `episodic` can be published as a general-purpose tool (D2). The Everything Digital Health configuration and channel documents now live in the EDH workspace under `channels/everything-digital-health/`.
+This standalone repository holds the schema, [`example.toml`](example.toml), and redacted conformance fixtures only. Production channel configuration, editorial policy, credentials, and episode state live in each channel's own external workspace and are never committed here (D2, D9).
+
+## Workspace Selection
+
+Place `eps.toml` at the root of a channel workspace and invoke `eps` there. From anywhere else, supply `--config <path>`; relative selectors are relative to PWD. The explicit selector wins over PWD `eps.toml`. No ancestor directories, environment variables (including `EPS_CONFIG`), global locations, or legacy `channels/<id>/channel.toml` layouts are searched. A missing or invalid selected file fails without fallback.
+
+All relative configuration assets, including `paths.episodes`, prompt files, thumbnail fonts, and credential references, resolve against the normalized absolute config parent. Normalization follows filesystem symlinks, so a symlinked config uses the real config's parent, and `..` is resolved with filesystem semantics. Prompts are read from `prompts/` beside the config. The default episode directory is `episodes/` beside the config. Directory names have no special meaning: a config explicitly selected under `channels/` still resolves against its own parent. CLI episode, media, and output arguments remain PWD-relative.
+
+`eps channel show` reports the selected config; `eps channel list` returns a one-element list for that same workspace and fails if it cannot load it. `eps channel validate` emits a diagnostic report, including all existing semantic validation issues. Normal loads also reject semantic errors, unknown keys and sections, and malformed TOML. Migration is iterative: move or explicitly select existing configs and adjust their relative paths; lossless legacy episode editing remains supported. No automatic config or episode migration is performed.
 
 ## Schema Shape
 
@@ -11,7 +19,7 @@ A configuration is a small generic core plus typed integration records (D4). Onl
 | Core | Purpose |
 |---|---|
 | `[channel]` | Stable ID, display name, host, timezone, subject, voice. |
-| `[paths]` | Workspace locations, resolved relative to the workspace root. |
+| `[paths]` | Workspace locations, resolved relative to the config parent. |
 | `[llm]` | Provider-neutral profiles and per-task routing. |
 | `[storage]` | Retention intervals and the canonical upload-source template. |
 | `[transcription]` | Backend, model, language, device. |

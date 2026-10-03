@@ -550,12 +550,7 @@ impl ChannelConfig {
 }
 
 impl ChannelConfig {
-    /// Resolve the episodes directory against the workspace root.
-    ///
-    /// Relative paths in a config are relative to the workspace, not to the
-    /// config file: a config at `<workspace>/channels/<id>.toml` saying
-    /// `episodes = "episodes"` means `<workspace>/episodes`. A config kept
-    /// outside a `channels` directory is resolved against its own directory.
+    /// Resolve the episodes directory against the configuration's parent.
     pub fn episodes_path(&self, config_path: &Path) -> Result<PathBuf> {
         let episodes = self
             .paths
@@ -569,39 +564,29 @@ impl ChannelConfig {
     }
 }
 
-/// The directory a relative config path is resolved against.
+/// The absolute configuration parent, without layout-dependent heuristics.
 pub fn workspace_root(config_path: &Path) -> Result<PathBuf> {
-    let directory = config_path
+    let path = resolve_path(Some(config_path))?;
+    Ok(path
         .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let is_nested_channel = directory
-        .parent()
-        .and_then(Path::file_name)
-        .is_some_and(|name| name == "channels")
-        && config_path
-            .file_name()
-            .is_some_and(|name| name == "channel.toml");
-    if is_nested_channel && let Some(parent) = directory.parent().and_then(Path::parent) {
-        return Ok(if parent.as_os_str().is_empty() {
-            PathBuf::from(".")
-        } else {
-            parent.to_path_buf()
-        });
-    }
-    if directory.file_name().is_some_and(|name| name == "channels")
-        && let Some(parent) = directory.parent()
-    {
-        return Ok(if parent.as_os_str().is_empty() {
-            PathBuf::from(".")
-        } else {
-            parent.to_path_buf()
-        });
-    }
-    Ok(directory)
+        .context("config path has no parent")?
+        .to_path_buf())
 }
 
 pub fn load(path: &Path) -> Result<ChannelConfig> {
+    let config = parse(path)?;
+    let issues = config_issues(&config);
+    if !issues.is_empty() {
+        bail!(
+            "invalid channel config {}: {}",
+            path.display(),
+            issues.join("; ")
+        );
+    }
+    Ok(config)
+}
+
+fn parse(path: &Path) -> Result<ChannelConfig> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("could not read channel config {}", path.display()))?;
     toml::from_str(&source)
@@ -609,7 +594,7 @@ pub fn load(path: &Path) -> Result<ChannelConfig> {
 }
 
 pub fn validate(path: &Path) -> ChannelValidation {
-    match load(path) {
+    match parse(path) {
         Ok(config) => {
             let issues = config_issues(&config);
             ChannelValidation {
@@ -628,62 +613,27 @@ pub fn validate(path: &Path) -> ChannelValidation {
     }
 }
 
-pub fn list(directory: &Path) -> Result<Vec<ChannelListEntry>> {
-    let mut paths = fs::read_dir(directory)
-        .with_context(|| format!("could not read channel directory {}", directory.display()))?
-        .filter_map(|entry| entry.ok().map(|item| item.path()))
-        .filter(|path| path.is_dir())
-        .map(|path| path.join("channel.toml"))
-        .filter(|path| path.is_file())
-        .collect::<Vec<_>>();
-    paths.sort();
-
-    Ok(paths
-        .into_iter()
-        .map(|path| {
-            let result = validate(&path);
-            let (id, name) = result
-                .channel
-                .as_ref()
-                .map(|channel| (Some(channel.id.clone()), Some(channel.name.clone())))
-                .unwrap_or_default();
-            ChannelListEntry {
-                config_path: path,
-                id,
-                name,
-                valid: result.valid,
-                issues: result.issues,
-            }
-        })
-        .collect())
+pub fn list(path: &Path) -> Result<Vec<ChannelListEntry>> {
+    let config = load(path)?;
+    Ok(vec![ChannelListEntry {
+        config_path: path.to_path_buf(),
+        id: Some(config.channel.id),
+        name: Some(config.channel.name),
+        valid: true,
+        issues: Vec::new(),
+    }])
 }
 
-pub fn resolve_path(explicit: Option<&Path>, channel: Option<&str>) -> Result<PathBuf> {
-    if let Some(path) = explicit {
-        return Ok(path.to_path_buf());
-    }
-
-    let directory = PathBuf::from("channels");
-    if let Some(id) = channel {
-        let path = directory.join(id).join("channel.toml");
-        if path.is_file() {
-            return Ok(path);
-        }
-        bail!(
-            "channel config not found: {} (pass --config explicitly)",
-            path.display()
-        );
-    }
-
-    let entries = list(&directory)?;
-    match entries.as_slice() {
-        [only] => Ok(only.config_path.clone()),
-        [] => bail!(
-            "no channel configs found in {} (pass --config explicitly)",
-            directory.display()
-        ),
-        _ => bail!("multiple channel configs found; pass --channel or --config"),
-    }
+pub fn resolve_path(explicit: Option<&Path>) -> Result<PathBuf> {
+    let path = explicit.unwrap_or_else(|| Path::new("eps.toml"));
+    let absolute = std::path::absolute(path)
+        .with_context(|| format!("could not resolve config path {}", path.display()))?;
+    fs::canonicalize(&absolute).with_context(|| {
+        format!(
+            "could not resolve channel config {} (run from a workspace containing eps.toml or pass --config)",
+            absolute.display()
+        )
+    })
 }
 
 fn config_issues(config: &ChannelConfig) -> Vec<String> {
@@ -840,31 +790,36 @@ mod tests {
     }
 
     #[test]
-    fn resolves_episode_paths_against_the_workspace_not_the_config() {
+    fn resolves_episode_paths_against_the_config_parent_without_layout_heuristics() {
+        let temp = tempfile::tempdir().unwrap();
         let config: ChannelConfig =
             toml::from_str(&format!("{}\n[paths]\nepisodes = 'episodes'\n", identity())).unwrap();
-        assert_eq!(
-            config
-                .episodes_path(std::path::Path::new("/work/channels/example/channel.toml"))
-                .unwrap(),
-            std::path::PathBuf::from("/work/episodes")
-        );
-        assert_eq!(
-            config
-                .episodes_path(std::path::Path::new("/elsewhere/example.toml"))
-                .unwrap(),
-            std::path::PathBuf::from("/elsewhere/episodes")
-        );
+        for relative in [
+            "channels/example/channel.toml",
+            "channels/example.toml",
+            "eps.toml",
+        ] {
+            let path = temp.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, identity()).unwrap();
+            assert_eq!(
+                config.episodes_path(&path).unwrap(),
+                std::fs::canonicalize(path.parent().unwrap())
+                    .unwrap()
+                    .join("episodes")
+            );
+        }
     }
 
     #[test]
     fn defaults_the_episodes_directory_when_unset() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("eps.toml");
+        std::fs::write(&path, identity()).unwrap();
         let config: ChannelConfig = toml::from_str(identity()).unwrap();
         assert_eq!(
-            config
-                .episodes_path(std::path::Path::new("/work/channels/example/channel.toml"))
-                .unwrap(),
-            std::path::PathBuf::from("/work/episodes")
+            config.episodes_path(&path).unwrap(),
+            std::fs::canonicalize(temp.path()).unwrap().join("episodes")
         );
     }
 

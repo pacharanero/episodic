@@ -6,24 +6,20 @@ use crate::output::{self, OutputFormat};
 use anyhow::{Result, bail};
 use std::path::Path;
 
-pub fn list(directory: &Path, format: OutputFormat) -> Result<()> {
-    let entries = channel::list(directory)?;
-    let text = if entries.is_empty() {
-        format!("No channel configs found in {}", directory.display())
-    } else {
-        entries
-            .iter()
-            .map(|entry| {
-                let status = if entry.valid { "valid" } else { "invalid" };
-                format!(
-                    "{}\t{}\t{status}",
-                    entry.id.as_deref().unwrap_or("?"),
-                    entry.name.as_deref().unwrap_or("?")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+pub fn list(path: &Path, format: OutputFormat) -> Result<()> {
+    let entries = channel::list(path)?;
+    let text = entries
+        .iter()
+        .map(|entry| {
+            let status = if entry.valid { "valid" } else { "invalid" };
+            format!(
+                "{}\t{}\t{status}",
+                entry.id.as_deref().unwrap_or("?"),
+                entry.name.as_deref().unwrap_or("?")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     output::write(format, &entries, &text)
 }
 

@@ -106,6 +106,180 @@ fn episode_inspection_reports_ready_fixture() {
 }
 
 #[test]
+fn config_selection_uses_pwd_or_explicit_path_and_reports_one_channel() {
+    let workspace = Workspace::new();
+    let elsewhere = workspace.root.join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    // An invalid local config must not interfere with an explicit selector.
+    fs::write(elsewhere.join("eps.toml"), "invalid TOML").unwrap();
+    for (cwd, selector) in [
+        (&workspace.root, None),
+        (&elsewhere, Some(PathBuf::from("./../eps.toml"))),
+        (&elsewhere, Some(workspace.config.clone())),
+    ] {
+        for command in ["show", "list"] {
+            let mut cmd = cargo_bin_cmd!("eps");
+            cmd.current_dir(cwd);
+            if let Some(path) = &selector {
+                cmd.arg("--config").arg(path);
+            }
+            let output = cmd
+                .args(["channel", command, "--format", "json"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let summary = if command == "list" {
+                assert_eq!(value.as_array().unwrap().len(), 1);
+                &value[0]
+            } else {
+                &value
+            };
+            assert_eq!(summary["id"], "fixture-channel");
+            assert_eq!(summary["config_path"], workspace.config.to_str().unwrap());
+        }
+        let mut cmd = cargo_bin_cmd!("eps");
+        cmd.current_dir(cwd);
+        if let Some(path) = &selector {
+            cmd.arg("--config").arg(path);
+        }
+        let output = cmd
+            .args([
+                "episode",
+                "new",
+                "2026-09-07",
+                "Portable",
+                "--dry-run",
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(
+                workspace
+                    .root
+                    .join("episodes/in-planning/2026.09.07-portable")
+                    .to_str()
+                    .unwrap()
+            )
+        );
+        assert!(!workspace.root.join("episodes").exists());
+    }
+}
+
+#[test]
+fn missing_and_invalid_selected_configs_never_fall_back() {
+    let workspace = Workspace::new();
+    let child = workspace.root.join("child");
+    fs::create_dir(&child).unwrap();
+    let legacy = child.join("channels/fixture-channel");
+    fs::create_dir_all(&legacy).unwrap();
+    fs::copy(&workspace.config, legacy.join("channel.toml")).unwrap();
+    let global = child.join("global/eps");
+    fs::create_dir_all(&global).unwrap();
+    fs::copy(&workspace.config, global.join("eps.toml")).unwrap();
+    // No ancestor traversal, legacy discovery, environment or global fallback.
+    let output = cargo_bin_cmd!("eps")
+        .current_dir(&child)
+        .env("EPS_CONFIG", &workspace.config)
+        .env("XDG_CONFIG_HOME", child.join("global"))
+        .env("HOME", &child)
+        .args(["channel", "show"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(child.join("eps.toml").to_str().unwrap())
+    );
+
+    let bad = workspace.root.join("bad.toml");
+    let valid = fs::read_to_string(&workspace.config).unwrap();
+    for (source, diagnostic) in [
+        (None, "could not resolve"),
+        (Some("[channel".to_owned()), "could not parse"),
+        (
+            Some(valid.replace("fixture-channel", "INVALID_ID")),
+            "channel.id",
+        ),
+        (Some(format!("{valid}\n[unknown]\nvalue = 1\n")), "unknown"),
+        (Some(valid.replace("host =", "typo =")), "typo"),
+    ] {
+        if let Some(source) = &source {
+            fs::write(&bad, source).unwrap();
+        }
+        for command in ["show", "list", "validate"] {
+            let output = cargo_bin_cmd!("eps")
+                .current_dir(&workspace.root)
+                .args(["--config", "bad.toml", "channel", command])
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            let messages = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(messages.contains(diagnostic), "{messages}");
+            assert!(messages.contains(bad.to_str().unwrap()), "{messages}");
+        }
+        if let Some(source) = source {
+            fs::write(child.join("eps.toml"), source).unwrap();
+            let output = cargo_bin_cmd!("eps")
+                .current_dir(&child)
+                .args(["episode", "new", "2026-09-07", "Must not create"])
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(!child.join("episodes").exists());
+        }
+    }
+    let output = cargo_bin_cmd!("eps")
+        .current_dir(&workspace.root)
+        .args(["--channel", "fixture-channel", "channel", "show"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn config_normalization_preserves_symlink_and_parent_traversal_semantics() {
+    let workspace = Workspace::new();
+    let caller = tempfile::tempdir().unwrap();
+    fs::create_dir(workspace.root.join("child")).unwrap();
+    std::os::unix::fs::symlink(
+        workspace.root.join("child"),
+        caller.path().join("linked-child"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&workspace.config, caller.path().join("linked.toml")).unwrap();
+    for selector in ["linked-child/../eps.toml", "linked.toml"] {
+        let output = cargo_bin_cmd!("eps")
+            .current_dir(caller.path())
+            .args(["--config", selector, "channel", "show", "--format", "json"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["config_path"], workspace.config.to_str().unwrap());
+    }
+}
+
+#[test]
 fn episode_validation_rejects_truncated_chapters() {
     let fixture = EpisodeFixture::new(true);
     let output = cargo_bin_cmd!("eps")
@@ -1261,8 +1435,7 @@ fn completions_generate_for_supported_shells() {
     }
 }
 
-/// A workspace laid out the way a real channel workspace is: a channel config
-/// under `channels/<id>/`, with episodes resolved relative to the workspace root.
+/// A standalone workspace with eps.toml beside its episodes directory.
 struct Workspace {
     _temp: TempDir,
     root: PathBuf,
@@ -1273,8 +1446,7 @@ impl Workspace {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
-        fs::create_dir_all(root.join("channels/fixture-channel")).unwrap();
-        let config = root.join("channels/fixture-channel/channel.toml");
+        let config = root.join("eps.toml");
         fs::write(
             &config,
             r#"
