@@ -11,8 +11,9 @@ This directory defines the channel-neutral behaviour of `episodic`. Channel iden
 5. [decisions.md](decisions.md) - resolved design decisions and the reasoning behind them.
 6. [documentation-map.md](documentation-map.md) - classification of the source workspace documentation.
 7. [roadmap.md](roadmap.md) - implementation milestones and status.
+8. [defects.md](defects.md) - faults found in real use, with reproduction steps.
 
-Resolved decisions live in [decisions.md](decisions.md). Historical query codes originated in the external EDH workspace; this standalone repository does not require a parent decision register. Current gaps and deferred work live in [roadmap.md](roadmap.md).
+Resolved decisions live in [decisions.md](decisions.md). Historical query codes originated in the external EDH workspace; this standalone repository does not require a parent decision register. Current gaps and deferred work live in [roadmap.md](roadmap.md), and faults in behaviour that is already implemented live in [defects.md](defects.md).
 
 ## Normative Language
 
