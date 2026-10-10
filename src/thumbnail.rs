@@ -160,8 +160,6 @@ pub fn compose(
     if text.trim().is_empty() {
         bail!("thumbnail text must not be empty");
     }
-    let magick = imagemagick()?;
-
     let font = policy
         .font_path
         .as_ref()
@@ -176,6 +174,7 @@ pub fn compose(
     if !font.is_file() {
         bail!("thumbnail font not found at {}", font.display());
     }
+    let magick = imagemagick()?;
 
     let png = match output {
         Some(path) => path.to_path_buf(),
