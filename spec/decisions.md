@@ -72,3 +72,15 @@ Decided 2026-09-07. Extraction to a standalone repository is approved. The norma
 Relative assets use the normalized absolute config parent, and every normal load runs semantic validation as well as strict TOML parsing. `channel list` represents the single selected workspace, not a multi-channel registry. Config-independent commands such as help, version, and explicit episode inspection need no workspace config.
 
 Migration is tolerant and iterative at the workflow and legacy-document boundary, not at the config validation boundary. Existing configs can be explicitly selected after their relative asset paths are adjusted; no automatic rewrite is added. External channel scripts and installation are separate work. Doctor, release automation, and clean-machine distribution remain future tasks. D8's native YouTube adapter is implemented as R10; its old R22 reference is historical, and `yutu` is not an engine dependency.
+
+## D10 - Distribution home, registry, and channels
+
+Decided 2026-10-10.
+
+**The repository is `pacharanero/episodic`.** The copyright holders are Dr Marcus Baw and Koloki Ltd (D3), so the owning account was genuinely ambiguous between the personal and company namespaces. It is published under the personal account because `episodic` is a general-purpose tool rather than a company product, and D2 already separates it from any channel or company it happens to serve.
+
+**It publishes to crates.io as `episodic-cli`.** `eps` is a CLI people may reasonably `cargo install`, and the library is the engine a future GUI and MCP server will share, so the registry is the natural distribution point as well as a name claim worth making early. The shorter `episodic` name is already owned by an unrelated project, so the published package name distinguishes this CLI while the project, library, and installed binary keep their existing names. Publication is by OIDC trusted publishing rather than a stored registry token, so no long-lived credential sits on the repository. Consequence: the `episodic-cli` name has to be owned on crates.io with a trusted publisher configured for `publish-crates.yml` before the first release can complete, and a published version can only ever be yanked, never withdrawn, which is why the publish workflow runs the tests even though the release build does not.
+
+**Homebrew is deferred.** The house standard says to set `tap` and `publish-jobs` only once a maintained Homebrew channel exists, and there is no tap for this project yet. The shell, PowerShell, and MSI installers plus `cargo binstall` cover the platforms in the meantime. Revisit at the next distribution review; adding it later is two config lines and a tap token, and needs no change to the release model.
+
+See [roadmap.md](roadmap.md) R17 and `~/code/house-style/distribution.md`.

@@ -178,6 +178,12 @@ pub fn locate(input: &Path) -> Result<(PathBuf, PathBuf, String)> {
     if !input.is_dir() {
         bail!("episode path not found: {}", input.display());
     }
+    // Resolved before the name is taken. `.` and `..` have no final component
+    // at all, so deriving the basename from the path as typed reported them as
+    // invalid UTF-8, and a plain relative name lost the stage directory that
+    // the lifecycle is read from. Running `eps` inside the episode folder is
+    // the normal case, so `.` has to work.
+    let input = &std::path::absolute(input).unwrap_or_else(|_| input.to_path_buf());
     let base = input
         .file_name()
         .and_then(|name| name.to_str())

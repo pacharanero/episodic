@@ -1,0 +1,126 @@
+# SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Detects the version bump that `s/version++` lands on main, creates the
+# annotated tag, then invokes the release and crates.io workflows directly.
+#
+# The downstream workflows are invoked by `workflow_call` rather than left to
+# the tag push: a tag pushed with the default GITHUB_TOKEN does not trigger
+# `push: tags` workflows, because of GitHub's anti-recursion guard. Using
+# `workflow_call` keeps release authority in CI without a long-lived PAT.
+name: Auto-tag release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to recover, for example v1.2.3.
+        required: false
+        type: string
+      commit:
+        description: Merged release commit to tag.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: Tag version bump
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        name: Detect version bump
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          REQUESTED_COMMIT: ${{ inputs.commit }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          commit="$GITHUB_SHA"
+
+          # Manual recovery path, for when a release commit landed but the tag
+          # was not created. Both inputs are required so a tag can never be
+          # attached to an arbitrary commit by accident.
+          if [[ -n "$REQUESTED_TAG$REQUESTED_COMMIT" ]]; then
+            if [[ -z "$REQUESTED_TAG" || -z "$REQUESTED_COMMIT" ]]; then
+              echo "Both tag and commit are required for recovery." >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$REQUESTED_COMMIT" origin/main; then
+              echo "Recovery commit $REQUESTED_COMMIT is not reachable from main." >&2
+              exit 1
+            fi
+            commit="$REQUESTED_COMMIT"
+            current="$(git show "$commit:Cargo.toml" | awk -F'"' '/^version = / {print $2; exit}')"
+            if [[ "$REQUESTED_TAG" != "v$current" ]]; then
+              echo "Recovery tag $REQUESTED_TAG does not match $commit's version v$current." >&2
+              exit 1
+            fi
+            tag="$REQUESTED_TAG"
+          else
+            current="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml)"
+            previous=""
+            if [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+              previous="$(git show "$BEFORE:Cargo.toml" 2>/dev/null | awk -F'"' '/^version = / {print $2; exit}' || true)"
+            fi
+
+            if [[ -z "$current" || "$current" == "$previous" ]]; then
+              echo "Cargo.toml version did not change; no tag created."
+              exit 0
+            fi
+            tag="v$current"
+          fi
+
+          # A version is released once. Retagging would change what a released
+          # version means to anyone who already installed it.
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "Tag $tag already exists; refusing to retag a version." >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Create annotated tag
+        if: steps.version.outputs.tag != ''
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$COMMIT" -m "Release $TAG"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$TAG"
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    uses: $/.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+
+  publish-crates:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    uses: $/.github/workflows/publish-crates.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: read
+      id-token: write

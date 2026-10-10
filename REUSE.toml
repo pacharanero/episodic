@@ -12,9 +12,11 @@ path = [
     "Cargo.toml",
     "REUSE.toml",
     "channels/**/*.toml",
+    "cliff.toml",
     "s/**",
     "src/**",
     "tests/**/*.rs",
+    "wix/**",
 ]
 SPDX-FileCopyrightText = "2026 Dr Marcus Baw and Koloki Ltd"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
@@ -22,6 +24,7 @@ SPDX-License-Identifier = "AGPL-3.0-or-later"
 [[annotations]]
 path = [
     "AGENTS.md",
+    "CHANGELOG.md",
     "CLAUDE.md",
     "README.md",
     "SECURITY.md",

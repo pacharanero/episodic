@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The one release action: bump the version, regenerate the changelog, and land
+# the result on main. Everything after that is CI's job.
+#
+#   s/version++ [patch|minor|major]   (defaults to patch)
+#
+# Landing the bump on main *is* the release. `auto-tag.yml` notices the changed
+# version, creates the annotated tag, and invokes the release and crates.io
+# workflows. There is deliberately no second script that tags or publishes.
+#
+# The mode is detected from branch protection on main: protected means the bump
+# lands through a release PR, unprotected means a direct push. Force either with
+# --pr or --direct.
+
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+bump="patch"
+mode="auto"
+for argument in "$@"; do
+    case "$argument" in
+        patch | minor | major) bump="$argument" ;;
+        --pr) mode="pr" ;;
+        --direct) mode="direct" ;;
+        -h | --help)
+            sed -n '5,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "unknown argument: $argument" >&2
+            exit 1
+            ;;
+    esac
+done
+
+for tool in cargo-set-version git-cliff gh; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "$tool is required but not installed" >&2
+        exit 1
+    fi
+done
+
+# A broken or unformatted tree must never ship, and releasing from a detached
+# or feature branch would tag code that is not what main contains.
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [[ "$branch" != "main" ]]; then
+    echo "releases start from main, not $branch" >&2
+    exit 1
+fi
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "the working tree is dirty; commit or stash first" >&2
+    exit 1
+fi
+
+git fetch origin main --tags --quiet
+if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+    echo "main is not in step with origin/main; pull or push first" >&2
+    exit 1
+fi
+
+echo "Running pre-release checks ..."
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+reuse lint >/dev/null
+
+if [[ "$mode" == "auto" ]]; then
+    if gh api "repos/{owner}/{repo}/branches/main/protection" >/dev/null 2>&1; then
+        mode="pr"
+    else
+        mode="direct"
+    fi
+fi
+
+# Determine the next version without mutating main. In PR mode the release
+# branch must exist before Cargo.toml, Cargo.lock, and CHANGELOG.md change.
+preview="$(cargo set-version --bump "$bump" --dry-run 2>&1)"
+if [[ "$preview" =~ to\ ([0-9A-Za-z.+-]+) ]]; then
+    version="${BASH_REMATCH[1]}"
+else
+    echo "could not determine the next version:" >&2
+    echo "$preview" >&2
+    exit 1
+fi
+tag="v$version"
+
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    echo "$tag already exists; a released version is never re-cut" >&2
+    exit 1
+fi
+
+if [[ "$mode" == "pr" ]]; then
+    git switch --quiet --create "release/$tag"
+fi
+
+cargo set-version --bump "$bump"
+
+# The changelog has to be correct *before* the tag exists, because the tag is
+# what the GitHub Release notes are generated from. Regenerating it here puts
+# it in the same commit that CI will tag.
+git-cliff --tag "$tag" --output CHANGELOG.md
+cargo update --workspace --quiet
+
+git add Cargo.toml Cargo.lock CHANGELOG.md
+git commit --quiet --message "chore(release): $tag"
+
+# The tag is created by CI from the commit that lands on main, never here: in
+# PR mode the commit to tag is a server-side merge whose SHA is not knowable
+# from a laptop. Committing the bump and then tagging locally is the classic
+# way to tag the *previous* commit by mistake.
+if [[ "$mode" == "pr" ]]; then
+    git push --quiet --set-upstream origin "release/$tag"
+    gh pr create --base main --head "release/$tag" \
+        --title "chore(release): $tag" \
+        --body "Version bump and changelog for $tag.
+
+Merge with a **merge commit**, not a squash: squashing renames the
+\`chore(release)\` commit to the PR title, and git-cliff then stops skipping it,
+so the release leaks into its own changelog.
+
+Merging is the release. \`auto-tag.yml\` creates $tag and invokes the release
+and crates.io workflows."
+    echo
+    echo "Opened a release PR for $tag. Merging it with a merge commit releases."
+else
+    git push --quiet origin main
+    echo
+    echo "Pushed $tag's version bump to main. CI will tag and release it."
+fi

@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Publishes `episodic-cli` to crates.io on a release tag. Authentication is by
+# OIDC workload identity through crates.io trusted publishing, so no
+# long-lived registry token is stored on this repository.
+#
+# Before the first release, a trusted publisher for this workflow has to be
+# configured on crates.io, and the `episodic-cli` name has to be owned there.
+name: Publish to crates.io
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to publish.
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Install Rust stable
+        # Plain rustup rather than a third-party action, matching ci.yml.
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      # The release build does not run the tests, so they run here: a version
+      # published to crates.io cannot be withdrawn, only yanked.
+      - name: cargo build
+        run: cargo build --release --locked
+
+      - name: cargo test
+        run: cargo test --locked --quiet
+
+      - name: cargo publish (dry run)
+        run: cargo publish --dry-run --locked
+
+      - name: Authenticate with crates.io
+        id: crates_io_auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
+        run: cargo publish --locked

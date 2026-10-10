@@ -2,14 +2,40 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 [package]
-name = "episodic"
+name = "episodic-cli"
 version = "0.1.0"
 edition = "2024"
-description = "Local-first episode production automation"
+authors = ["Marcus Baw <info@koloki.co>"]
+description = "Plan, produce, and publish video and podcast episodes from the command line: audio mastering, transcripts, captions, chapters, tags, descriptions, thumbnails, and YouTube upload"
 license = "AGPL-3.0-or-later"
+repository = "https://github.com/pacharanero/episodic"
+homepage = "https://github.com/pacharanero/episodic"
 readme = "README.md"
-keywords = ["podcast", "video", "automation", "cli"]
+keywords = ["youtube", "podcast", "video", "publishing", "cli"]
 categories = ["command-line-utilities", "multimedia"]
+
+# These GUIDs identify the MSI product line and its PATH component. They must
+# never change: Windows uses them to recognise one install as an upgrade of
+# another. They are declared here rather than left only in `wix/main.wxs` so
+# regenerating that file cannot silently mint new ones. `license`/`eula` are
+# off because the AGPL text is not in the RTF form the installer UI expects.
+[package.metadata.wix]
+upgrade-guid = "0A57B521-D2A3-4714-82DA-42AA2A2F18E9"
+path-guid = "98FE950E-3E20-4873-8C36-783BDA25AAC6"
+license = false
+eula = false
+
+# cargo-binstall maps dist's target archives to `eps` in the nested Unix
+# archive layout and the flat Windows ZIP layout.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.xz"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.zip"
+pkg-fmt = "zip"
+bin-dir = "{ bin }{ binary-ext }"
 
 [lib]
 name = "episodic"
@@ -22,6 +48,40 @@ path = "src/main.rs"
 [workspace]
 members = ["."]
 resolver = "3"
+
+# Config for 'dist'
+[workspace.metadata.dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax). 0.32.0
+# is the newest version published to crates.io; a v0.33.0 GitHub release
+# exists but is not on the registry, so pinning it would make the local and
+# CI toolchains disagree.
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app. Homebrew is deliberately absent:
+# this project has no maintained tap yet, and the house standard says to set
+# `tap` and `publish-jobs` only once a real distribution channel exists.
+installers = ["shell", "powershell", "msi"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false
+publish-prereleases = false
+# The generated release.yml is hand-edited to pin action SHAs, which dist
+# would otherwise report as drift.
+allow-dirty = ["ci"]
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [dependencies]
 anyhow = "1.0.104"

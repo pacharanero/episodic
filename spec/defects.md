@@ -8,9 +8,11 @@ Roadmap milestones live in [roadmap.md](roadmap.md); resolved design decisions l
 
 ## Source of these findings
 
-All five were found in a single session on 2026-09-25, processing one real Everything Digital Health episode end-to-end with `eps 0.1.0`: a 21:45 1080p30 edited master through `audio analyse`, `audio process`, `transcript extract`, `transcript transcribe`, `metadata chapters|tags|quote|description`, `thumbnail frames|compose`, `episode new|promote|set|set-tags|mark-playlist|validate`, and `youtube plan-upload|upload|verify|playlist`, ending in a successful unlisted upload with captions, thumbnail, and two playlists.
+F1 to F5 were all found in a single session on 2026-09-25, processing one real Everything Digital Health episode end-to-end with `eps 0.1.0`: a 21:45 1080p30 edited master through `audio analyse`, `audio process`, `transcript extract`, `transcript transcribe`, `metadata chapters|tags|quote|description`, `thumbnail frames|compose`, `episode new|promote|set|set-tags|mark-playlist|validate`, and `youtube plan-upload|upload|verify|playlist`, ending in a successful unlisted upload with captions, thumbnail, and two playlists.
 
 This is the first end-to-end production run and therefore the beginning of R18 acceptance evidence. None of the defects below are architectural; each is a small, local fix.
+
+All of F1 to F5 are now fixed, with tests, but that is test evidence rather than a second production run: the fixes have not yet been exercised against a real episode and the live API together. R18 still wants that run. F6 was found separately, while verifying the README's instructions.
 
 What worked without incident, and is worth not regressing: `--dry-run` plans matched what applying did; the chapter task rejected its own first attempt for violating the contract and regenerated; `audio analyse` correctly attributed a post-processing true-peak overshoot to encoder behaviour and advised against reprocessing; `episode set` refused to overwrite non-placeholder values without `--force`; `doctor` was explicit about the limits of its own checks.
 
@@ -164,6 +166,29 @@ Where `episode new` left a `[TBD]` checkbox, it is filled rather than left besid
 `mark_playlist` still refuses to invent a line, which remains right when an operator names a playlist by hand.
 
 Reproduction: add a video to a topic playlist that is not yet listed in the episode record, then attempt `episode mark-playlist`.
+
+---
+
+## F6 - An episode addressed as `.` was reported as invalid UTF-8
+
+- [x] **Fixed.** The episode path is resolved before its basename is taken.
+
+Found on 2026-10-10 while testing the README's own instructions, not in a production run.
+
+Running `eps` from inside the episode folder is the normal case, but addressing that folder as `.` failed:
+
+```
+$ eps episode validate .
+Error: episode directory name is not valid UTF-8
+```
+
+The path was never invalid. `Path::new(".").file_name()` is `None`, because `.` has no final component, and the `None` fell into the context message for a non-UTF-8 name. `..` failed the same way.
+
+The same root cause degraded a case that did not error. Addressing an episode by a plain relative name from its parent directory reported `Stage: unknown` and therefore the wrong next action, because the lifecycle stage is read from the parent directory in the path, and a bare name has none.
+
+Fixed by resolving the input with `std::path::absolute` before deriving the basename, which is the same thing `thumbnail::default_output` already did for a frame path. `.`, `..`, and bare relative names now all report the correct stage.
+
+Worth noting as a class of fault rather than a one-off: three places had independently decided how to turn a user-supplied path into a name, and this is the second defect caused by that (see F2). Reproduction: `cd` into any episode folder and run `eps episode validate .`.
 
 ---
 

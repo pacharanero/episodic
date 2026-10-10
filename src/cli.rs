@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 #[command(
     name = "eps",
     version,
-    about = "Local-first episode production automation",
+    about = "Plan, produce, and publish video and podcast episodes from the command line",
     disable_help_subcommand = true
 )]
 pub struct Cli {

@@ -12,8 +12,36 @@ fn bare_invocation_is_helpful_and_successful() {
     let output = cargo_bin_cmd!("eps").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Local-first episode production automation"));
+    assert!(stdout.contains("Plan, produce, and publish"));
     assert!(stdout.contains("Commands:"));
+}
+
+#[test]
+fn episode_validation_accepts_the_current_episode_directory() {
+    let workspace = Workspace::new();
+    let created = workspace
+        .eps(&["episode", "new", "2026-09-15", "Current directory"])
+        .unwrap();
+    assert!(created.status.success());
+    let episode = workspace
+        .root
+        .join("episodes/in-planning/2026.09.15-current-directory");
+
+    let output = cargo_bin_cmd!("eps")
+        .arg("--config")
+        .arg(&workspace.config)
+        .args(["episode", "validate", "."])
+        .current_dir(episode)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Stage: in-planning"));
 }
 
 #[test]
