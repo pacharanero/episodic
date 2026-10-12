@@ -91,6 +91,7 @@ google-youtube3 = { version = "7.0.0", features = ["yup-oauth2"] }
 hyper-rustls = { version = "0.27.9", features = ["http2", "ring", "rustls-native-certs"] }
 hyper-util = { version = "0.1.20", features = ["client-legacy"] }
 rustls = { version = "0.23.43", default-features = false, features = ["ring"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_yaml_ng = "0.10.0"

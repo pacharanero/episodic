@@ -566,6 +566,71 @@ fn marking_an_unlisted_playlist_fails_without_changing_anything() {
 }
 
 #[test]
+fn compact_published_records_support_plain_playlist_and_tag_shapes() {
+    let fixture = EpisodeFixture::with_document("compact-published", false);
+    let episode = fixture.episode.to_str().unwrap().to_owned();
+    let tags = fixture.episode.join("tags.txt");
+    fs::write(&tags, "new, compact, tags\n").unwrap();
+
+    for arguments in [
+        vec![
+            "episode",
+            "mark-playlist",
+            &episode,
+            "PLfixturecompact",
+            "--note",
+            "Added by fixture",
+        ],
+        vec![
+            "episode",
+            "set-tags",
+            &episode,
+            "--from-file",
+            tags.to_str().unwrap(),
+        ],
+    ] {
+        let output = cargo_bin_cmd!("eps").args(arguments).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let after = fixture.metadata();
+    assert!(after.contains("- [x] Compact Fixture Playlist (PLfixturecompact) - Added by fixture"));
+    assert!(after.contains("new, compact, tags\n"));
+    assert!(!after.contains("```"));
+    assert!(!after.contains("Tag character count"));
+}
+
+#[test]
+fn internal_records_update_their_own_publication_fields_without_new_sections() {
+    let fixture = EpisodeFixture::with_document("internal", false);
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "episode",
+            "set",
+            fixture.episode.to_str().unwrap(),
+            "Status=Withheld",
+            "--section",
+            "Publication",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let after = fixture.metadata();
+    assert!(after.contains("- **Status**: Withheld"));
+    for absent in ["## YouTube", "## Social Media & Publicity", "### Playlists"] {
+        assert!(!after.contains(absent), "unexpected section: {absent}");
+    }
+}
+
+#[test]
 fn a_new_episode_is_built_from_channel_configuration() {
     let workspace = Workspace::new();
     let output = workspace
@@ -1989,6 +2054,174 @@ fn completions_generate_for_supported_shells() {
         assert!(output.status.success(), "completion failed for {shell}");
         assert!(!output.stdout.is_empty());
     }
+}
+
+#[test]
+fn completion_install_writes_the_standard_filename_without_touching_profiles() {
+    let temporary = tempfile::tempdir().unwrap();
+    let directory = temporary.path().join("zfunc");
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--format",
+            "json",
+            "completions",
+            "install",
+            "--shell",
+            "zsh",
+            "--directory",
+            directory.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["path"], directory.join("_eps").to_str().unwrap());
+    assert_eq!(report["applied"], true);
+    assert!(directory.join("_eps").is_file());
+
+    let dry_run_directory = temporary.path().join("dry-run");
+    let output = cargo_bin_cmd!("eps")
+        .args([
+            "--dry-run",
+            "completions",
+            "install",
+            "--shell",
+            "fish",
+            "--directory",
+            dry_run_directory.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(!dry_run_directory.exists());
+}
+
+#[test]
+fn retention_audit_and_quarantine_preserve_the_uploaded_master() {
+    let workspace = Workspace::new();
+    fs::write(
+        &workspace.config,
+        format!(
+            "{}\n[storage]\nraw_media_retention_days = 1\ncanonical_uploaded_video = \"<base>.processed.mp4\"\n",
+            fs::read_to_string(&workspace.config).unwrap()
+        ),
+    )
+    .unwrap();
+    let base = "2020.01.01-retention-fixture";
+    let episode = workspace.root.join("episodes/published/2020").join(base);
+    fs::create_dir_all(episode.join(format!("{base}.frames"))).unwrap();
+    fs::write(
+        episode.join(format!("{base}.episode-data.md")),
+        "# Retention fixture\n\n- **Uploaded File**: 2020.01.01-retention-fixture.processed.mp4\n",
+    )
+    .unwrap();
+    fs::write(episode.join(format!("{base}.processed.mp4")), b"uploaded").unwrap();
+    fs::write(episode.join(format!("{base}.mp4")), b"source").unwrap();
+    fs::write(
+        episode.join(format!("{base}.frames/frame-01.png")),
+        b"frame",
+    )
+    .unwrap();
+    fs::write(episode.join(format!("{base}.wav")), b"audio").unwrap();
+
+    let audit = workspace.run(&["--format", "json", "storage", "audit"]);
+    assert!(
+        audit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    let audit: Value = serde_json::from_slice(&audit.stdout).unwrap();
+    let candidates = audit["candidates"].as_array().unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate["reason"] == "generated-cache-or-thumbnail-candidates")
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate["reason"] == "superseded-pre-audio-processed-video")
+    );
+    assert!(!candidates.iter().any(|candidate| {
+        candidate["path"]
+            .as_str()
+            .unwrap()
+            .ends_with(".processed.mp4")
+    }));
+
+    let plan = workspace.run(&[
+        "--format",
+        "json",
+        "cleanup",
+        "plan",
+        episode.to_str().unwrap(),
+    ]);
+    assert!(plan.status.success());
+    let plan: Value = serde_json::from_slice(&plan.stdout).unwrap();
+    assert!(
+        plan["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|candidate| candidate["class"] == "review" && candidate["selected"] == false)
+    );
+
+    let unapproved = workspace.run(&["cleanup", "apply", episode.to_str().unwrap()]);
+    assert!(unapproved.status.success());
+    assert!(episode.join(format!("{base}.frames")).exists());
+
+    let applied = workspace.run(&[
+        "--format",
+        "json",
+        "cleanup",
+        "apply",
+        episode.to_str().unwrap(),
+        "--apply",
+    ]);
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert!(episode.join(format!("{base}.processed.mp4")).exists());
+    assert!(episode.join(format!("{base}.wav")).exists());
+    assert!(!episode.join(format!("{base}.frames")).exists());
+    assert!(episode.join(".episode-cleanup-trash").exists());
+}
+
+#[test]
+fn command_registry_exposes_schema_template_and_safety() {
+    let commands = cargo_bin_cmd!("eps")
+        .args(["commands", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(commands.status.success());
+    let commands: Value = serde_json::from_slice(&commands.stdout).unwrap();
+    assert!(commands.as_array().unwrap().iter().any(|command| {
+        command["id"] == "cleanup/apply" && command["safety"] == "destructive_local"
+    }));
+
+    let schema = cargo_bin_cmd!("eps")
+        .args(["episode", "inspect", "--schema"])
+        .output()
+        .unwrap();
+    assert!(schema.status.success());
+    let schema: Value = serde_json::from_slice(&schema.stdout).unwrap();
+    assert_eq!(schema["$id"], "urn:episodic:command:episode/inspect");
+    assert_eq!(schema["required"], serde_json::json!(["path"]));
+
+    let template = cargo_bin_cmd!("eps")
+        .args(["cleanup", "apply", "--template"])
+        .output()
+        .unwrap();
+    assert!(template.status.success());
+    let template: Value = serde_json::from_slice(&template.stdout).unwrap();
+    assert_eq!(template["apply"], false);
+    assert!(template["episode"].as_str().unwrap().starts_with('<'));
 }
 
 /// A standalone workspace with eps.toml beside its episodes directory.

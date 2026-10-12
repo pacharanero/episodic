@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChannelConfig {
+    /// Configuration format version. Omitted legacy configs are version 1.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     pub channel: ChannelIdentity,
     #[serde(default)]
     pub paths: ChannelPaths,
@@ -44,6 +47,12 @@ pub struct ChannelConfig {
     pub recording: BTreeMap<String, RecordingProfile>,
     #[serde(default)]
     pub archive: BTreeMap<String, ArchiveTarget>,
+}
+
+pub const SCHEMA_VERSION: u32 = 1;
+
+fn default_schema_version() -> u32 {
+    SCHEMA_VERSION
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -84,7 +93,7 @@ pub struct LlmPolicy {
 pub struct LlmProfile {
     pub provider: String,
     pub model: String,
-    /// Executable for `provider = "cli"`; unused by provider-native routing.
+    /// Executable for `provider = "cli"`.
     #[serde(default)]
     pub command: Option<String>,
     #[serde(default)]
@@ -93,6 +102,9 @@ pub struct LlmProfile {
     pub input: Option<String>,
     #[serde(default)]
     pub timeout_seconds: Option<u64>,
+    /// Environment variable containing an API key for a native provider.
+    #[serde(default)]
+    pub api_key_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -464,8 +476,14 @@ pub struct PlaylistPolicy {
 pub struct CredentialReference {
     #[serde(default)]
     pub client_secret_path: Option<PathBuf>,
+    /// Environment variable containing the path to the client secret file.
+    #[serde(default)]
+    pub client_secret_env: Option<String>,
     #[serde(default)]
     pub token_path: Option<PathBuf>,
+    /// Environment variable containing the path to the OAuth token file.
+    #[serde(default)]
+    pub token_env: Option<String>,
     #[serde(default)]
     pub env: Option<String>,
 }
@@ -482,6 +500,7 @@ pub struct ArchiveTarget {
 #[derive(Debug, Serialize)]
 pub struct ChannelSummary {
     pub config_path: PathBuf,
+    pub schema_version: u32,
     pub id: String,
     pub name: String,
     pub host: String,
@@ -539,6 +558,7 @@ impl ChannelConfig {
         let sections = self.present_sections();
         ChannelSummary {
             config_path: config_path.to_path_buf(),
+            schema_version: self.schema_version,
             id: self.channel.id.clone(),
             name: self.channel.name.clone(),
             host: self.channel.host.clone(),
@@ -638,6 +658,12 @@ pub fn resolve_path(explicit: Option<&Path>) -> Result<PathBuf> {
 
 fn config_issues(config: &ChannelConfig) -> Vec<String> {
     let mut issues = Vec::new();
+    if config.schema_version != SCHEMA_VERSION {
+        issues.push(format!(
+            "schema_version must be {SCHEMA_VERSION}; this eps version does not migrate configuration version {}",
+            config.schema_version
+        ));
+    }
     if !valid_id(&config.channel.id) {
         issues.push(
             "channel.id must use lowercase ASCII letters, digits, and single hyphens".to_owned(),
@@ -679,6 +705,11 @@ fn config_issues(config: &ChannelConfig) -> Vec<String> {
                     "llm.profiles.{name} uses provider 'cli' and must set command"
                 ));
             }
+            if profile.provider == "anthropic" && profile.api_key_env.is_none() {
+                issues.push(format!(
+                    "llm.profiles.{name} uses provider 'anthropic' and must set api_key_env"
+                ));
+            }
         }
     }
     if let Some(storage) = &config.storage
@@ -714,7 +745,48 @@ fn config_issues(config: &ChannelConfig) -> Vec<String> {
             issues.push("audio.loudness_range must be greater than zero".to_owned());
         }
     }
+    for (name, reference) in &config.credentials {
+        credential_reference_issues(name, reference, &mut issues);
+    }
     issues
+}
+
+fn credential_reference_issues(
+    name: &str,
+    reference: &CredentialReference,
+    issues: &mut Vec<String>,
+) {
+    for (field, path, environment) in [
+        (
+            "client_secret",
+            reference.client_secret_path.as_ref(),
+            reference.client_secret_env.as_deref(),
+        ),
+        (
+            "token",
+            reference.token_path.as_ref(),
+            reference.token_env.as_deref(),
+        ),
+    ] {
+        if path.is_some() && environment.is_some() {
+            issues.push(format!(
+                "credentials.{name} must set only one of {field}_path or {field}_env"
+            ));
+        }
+        if let Some(environment) = environment
+            && !valid_environment_name(environment)
+        {
+            issues.push(format!(
+                "credentials.{name}.{field}_env must be a valid environment variable name"
+            ));
+        }
+    }
+}
+
+fn valid_environment_name(name: &str) -> bool {
+    let mut characters = name.bytes();
+    matches!(characters.next(), Some(byte) if byte.is_ascii_uppercase() || byte == b'_')
+        && characters.all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 fn valid_id(id: &str) -> bool {
@@ -729,7 +801,7 @@ fn valid_id(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChannelConfig, config_issues};
+    use super::{ChannelConfig, SCHEMA_VERSION, config_issues};
 
     #[test]
     fn accepts_minimal_valid_channel() {
@@ -755,7 +827,7 @@ mod tests {
     #[test]
     fn rejects_task_routed_to_undefined_profile() {
         let config: ChannelConfig = toml::from_str(&format!(
-            "{}\n[llm]\ndefault_profile = 'main'\n\n[llm.profiles.main]\nprovider = 'anthropic'\nmodel = 'claude-sonnet-5'\n\n[llm.tasks]\nchapters = 'missing'\n",
+            "{}\n[llm]\ndefault_profile = 'main'\n\n[llm.profiles.main]\nprovider = 'anthropic'\nmodel = 'claude-sonnet-5'\napi_key_env = 'ANTHROPIC_API_KEY'\n\n[llm.tasks]\nchapters = 'missing'\n",
             identity()
         ))
         .unwrap();
@@ -766,6 +838,16 @@ mod tests {
     fn rejects_cli_profile_without_command() {
         let config: ChannelConfig = toml::from_str(&format!(
             "{}\n[llm]\ndefault_profile = 'main'\n\n[llm.profiles.main]\nprovider = 'cli'\nmodel = 'some-model'\n",
+            identity()
+        ))
+        .unwrap();
+        assert_eq!(config_issues(&config).len(), 1);
+    }
+
+    #[test]
+    fn rejects_anthropic_profile_without_an_api_key_reference() {
+        let config: ChannelConfig = toml::from_str(&format!(
+            "{}\n[llm]\ndefault_profile = 'main'\n\n[llm.profiles.main]\nprovider = 'anthropic'\nmodel = 'claude-sonnet-5'\n",
             identity()
         ))
         .unwrap();
@@ -787,6 +869,33 @@ mod tests {
         let result =
             toml::from_str::<ChannelConfig>(&format!("{}\n[typo]\nvalue = 1\n", identity()));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn accepts_legacy_schema_version_and_rejects_unknown_versions() {
+        let legacy: ChannelConfig = toml::from_str(identity()).unwrap();
+        assert_eq!(legacy.schema_version, SCHEMA_VERSION);
+        assert!(config_issues(&legacy).is_empty());
+
+        let unsupported: ChannelConfig =
+            toml::from_str(&format!("schema_version = 2\n{}", identity())).unwrap();
+        assert!(config_issues(&unsupported)[0].contains("schema_version must be 1"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_invalid_credential_file_references() {
+        let config: ChannelConfig = toml::from_str(&format!(
+            "{}\n[credentials.youtube]\nclient_secret_path = 'secret.json'\nclient_secret_env = 'YOUTUBE_SECRET_PATH'\ntoken_env = 'not-valid'\n",
+            identity()
+        ))
+        .unwrap();
+        let issues = config_issues(&config);
+        assert!(issues.iter().any(|issue| issue.contains("only one")));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.contains("valid environment"))
+        );
     }
 
     #[test]

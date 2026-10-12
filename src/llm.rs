@@ -11,6 +11,7 @@
 use crate::channel::{ChannelConfig, LlmProfile};
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail};
+use serde_json::json;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -56,11 +57,60 @@ impl<'a> Model<'a> {
     pub fn complete(&self, prompt: &str) -> Result<String> {
         match self.profile.provider.as_str() {
             "cli" => self.complete_via_cli(prompt),
+            "anthropic" => self.complete_via_anthropic(prompt),
             other => bail!(
                 "llm profile '{}' uses provider '{other}', which is not implemented yet; only provider = \"cli\" works today",
                 self.profile_name
             ),
         }
+    }
+
+    fn complete_via_anthropic(&self, prompt: &str) -> Result<String> {
+        let variable = self.profile.api_key_env.as_deref().with_context(|| {
+            format!(
+                "llm profile '{}' uses provider 'anthropic' and must set api_key_env",
+                self.profile_name
+            )
+        })?;
+        let api_key = std::env::var(variable).with_context(|| {
+            format!(
+                "environment variable '{variable}' is required for Anthropic profile '{}'",
+                self.profile_name
+            )
+        })?;
+        if api_key.is_empty() {
+            bail!(
+                "environment variable '{variable}' is empty for Anthropic profile '{}'",
+                self.profile_name
+            );
+        }
+
+        let timeout = Duration::from_secs(self.profile.timeout_seconds.unwrap_or(180));
+        let response = reqwest::blocking::Client::builder()
+            .timeout(timeout)
+            .build()
+            .context("could not create the Anthropic HTTP client")?
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model": self.profile.model,
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}],
+            }))
+            .send()
+            .context("Anthropic Messages request failed")?;
+        let status = response.status();
+        let body: serde_json::Value = response
+            .json()
+            .context("Anthropic returned an unreadable response")?;
+        if !status.is_success() {
+            let message = body["error"]["message"]
+                .as_str()
+                .unwrap_or("no error message returned");
+            bail!("Anthropic Messages request failed with {status}: {message}");
+        }
+        anthropic_text(&body).context("Anthropic returned a response without text content")
     }
 
     fn complete_via_cli(&self, prompt: &str) -> Result<String> {
@@ -149,6 +199,20 @@ impl<'a> Model<'a> {
         }
         Ok(response)
     }
+}
+
+fn anthropic_text(response: &serde_json::Value) -> Option<String> {
+    response["content"].as_array().and_then(|blocks| {
+        blocks
+            .iter()
+            .filter(|block| block["type"] == "text")
+            .filter_map(|block| block["text"].as_str())
+            .map(str::to_owned)
+            .reduce(|mut text, next| {
+                text.push_str(&next);
+                text
+            })
+    })
 }
 
 #[cfg(unix)]
@@ -296,6 +360,18 @@ mod tests {
             render("an { unmatched brace", &[]).unwrap(),
             "an { unmatched brace"
         );
+    }
+
+    #[test]
+    fn extracts_all_text_blocks_from_an_anthropic_response() {
+        let response = json!({
+            "content": [
+                {"type": "thinking", "thinking": "internal"},
+                {"type": "text", "text": "first "},
+                {"type": "text", "text": "second"}
+            ]
+        });
+        assert_eq!(anthropic_text(&response).as_deref(), Some("first second"));
     }
 
     #[test]

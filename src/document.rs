@@ -676,7 +676,7 @@ impl Document {
 
 /// Both spellings occur in real documents: the planner writes the first, the
 /// publication tooling has written the second.
-const PLAYLIST_HEADINGS: &[&str] = &["Playlists to Add", "Playlists Added To"];
+const PLAYLIST_HEADINGS: &[&str] = &["Playlists to Add", "Playlists Added To", "Playlists"];
 /// The skeleton's unfilled-value marker, recognised so a generated
 /// placeholder is filled rather than left beside a real entry.
 const PLACEHOLDER: &str = "[To be added]";

@@ -192,6 +192,27 @@ Worth noting as a class of fault rather than a one-off: three places had indepen
 
 ---
 
+## F7 - `storage audit` and `cleanup plan` abort the whole stage on one episode with no metadata file
+
+- [ ] **Open.**
+
+Found on 2026-10-12 running `eps storage audit --stage published` (and `edited`, `not-for-publishing`) against the real EDH back catalogue with `eps` built from `7b03e76`.
+
+The back catalogue includes genuine episodes from before `<base>.episode-data.md` existed as a convention, plus a few `not-for-publishing` folders that were never fully set up. A single such folder anywhere in the scanned stage aborts the entire command with no output for any other episode in that stage:
+
+```
+$ eps storage audit --stage published
+Error: episode metadata not found in .../episodes/published/2026.01.28-primis-phcsg-and-more-with-john-robinson
+```
+
+`in-progress` and `in-planning` happened to have metadata everywhere and audited cleanly; `published`, `edited`, and `not-for-publishing` each have at least one folder without it and produced zero findings instead of partial findings. The legacy shell/Python `tools/maintenance/edh-storage-audit` this is meant to replace tolerates missing metadata per-folder and still reports on everything else, so this is a real regression for adopting the native command on an established back catalogue, not just a cosmetic difference.
+
+Expected: skip (and ideally report, e.g. on stderr or as a `skipped` list in JSON output) a folder with no metadata file, and continue auditing the rest of the stage, the same way a read-only reporting command should treat one bad input as a partial failure rather than a total one.
+
+Reproduction: run `eps storage audit --stage <any>` against a workspace containing at least one dated episode folder with no `<base>.episode-data.md`.
+
+---
+
 ## Not defects
 
 Recorded so they are not re-reported.

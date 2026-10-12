@@ -7,5 +7,6 @@ pub mod doctor;
 pub mod episode;
 pub mod media;
 pub mod metadata;
+pub mod retention;
 pub mod version;
 pub mod youtube;

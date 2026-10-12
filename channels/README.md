@@ -14,7 +14,7 @@ All relative configuration assets, including `paths.episodes`, prompt files, thu
 
 ## Schema Shape
 
-A configuration is a small generic core plus typed integration records (D4). Only `[channel]` is required, and no integration section is needed to load or validate a config.
+A configuration is a small generic core plus typed integration records (D4). Only `[channel]` is required, and no integration section is needed to load or validate a config. `schema_version = 1` is recommended for new workspaces; omitted legacy configurations are interpreted as version 1. An unsupported version fails clearly rather than being guessed or migrated automatically.
 
 | Core | Purpose |
 |---|---|
@@ -29,7 +29,7 @@ A configuration is a small generic core plus typed integration records (D4). Onl
 | Integration | Purpose |
 |---|---|
 | `[youtube]`, `[playlists]` | Destination identity, default privacy, playlist policy. |
-| `[credentials.*]` | Pointers to where a credential lives. |
+| `[credentials.*]` | Pointers to where a credential file lives. |
 | `[recording.*]` | Non-secret joining details, keyed by tool. |
 | `[archive.*]` | Long-term destinations, keyed by target name. |
 
@@ -45,6 +45,8 @@ Set `adaptive_contrast = true` under `[thumbnail]` to choose black or white capt
 - Generic command behaviour or adapter implementation.
 - Per-episode outcomes such as video IDs, selected playlists, publication dates, or social URLs.
 - Generated remote caches.
+
+For the native YouTube adapter, set exactly one of `client_secret_path` or `client_secret_env`, and exactly one of `token_path` or `token_env`, under `[credentials.youtube]`. A `*_path` is config-relative unless absolute. A `*_env` names an environment variable containing that file path. Environment variables therefore provide indirection to ignored local files; they do not carry the credential value itself. `eps doctor` reports configured environment references but never reads them or their target files.
 
 ## Second Channel
 

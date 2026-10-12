@@ -247,14 +247,19 @@ fn inspect(report: &mut Report, config: &channel::ChannelConfig, config_path: &P
             } else {
                 Status::Warning
             };
-            if profile.provider == "cli" {
-                report.tool(
+            match profile.provider.as_str() {
+                "cli" => report.tool(
                     &format!("llm.profiles.{name}"),
                     Tool::find(profile.command.as_deref().unwrap_or(""), &[]),
                     severity,
-                );
-            } else {
-                report.add(&format!("llm.profiles.{name}"), severity, None, "Provider not implemented; use provider = 'cli' for routed tasks (unused profiles are warnings)");
+                ),
+                "anthropic" => report.add(
+                    &format!("llm.profiles.{name}"),
+                    Status::Ok,
+                    None,
+                    "Anthropic Messages API; api_key_env is resolved only when generating metadata",
+                ),
+                _ => report.add(&format!("llm.profiles.{name}"), severity, None, "Provider not implemented; use provider = 'cli' for routed tasks (unused profiles are warnings)"),
             }
         }
         for task in &tasks {
@@ -300,26 +305,54 @@ fn inspect(report: &mut Report, config: &channel::ChannelConfig, config_path: &P
     }
 
     if config.youtube.is_some() || config.credentials.contains_key("youtube") {
-        for (name, path) in [
+        for (name, path, environment) in [
             (
-                "client_secret_path",
+                "client_secret",
                 config
                     .credentials
                     .get("youtube")
                     .and_then(|reference| reference.client_secret_path.as_ref()),
+                config
+                    .credentials
+                    .get("youtube")
+                    .and_then(|reference| reference.client_secret_env.as_deref()),
             ),
             (
-                "token_path",
+                "token",
                 config
                     .credentials
                     .get("youtube")
                     .and_then(|reference| reference.token_path.as_ref()),
+                config
+                    .credentials
+                    .get("youtube")
+                    .and_then(|reference| reference.token_env.as_deref()),
             ),
         ] {
-            let name = format!("credentials.youtube.{name}");
-            match path {
-                Some(path) => report.file(&name, root.join(path), true),
-                None => report.add(&name, Status::Error, None, "Set this file reference; the native YouTube adapter requires both credential files and does not support env-only credentials"),
+            match (path, environment) {
+                (Some(path), None) => report.file(
+                    &format!("credentials.youtube.{name}_path"),
+                    root.join(path),
+                    true,
+                ),
+                (None, Some(environment)) => report.add(
+                    &format!("credentials.youtube.{name}_env"),
+                    Status::Warning,
+                    None,
+                    &format!("Environment reference {environment} configured; its value and target file are not checked"),
+                ),
+                (None, None) => report.add(
+                    &format!("credentials.youtube.{name}_path"),
+                    Status::Error,
+                    None,
+                    "Set a file path or environment reference; the native YouTube adapter requires both credential files",
+                ),
+                (Some(_), Some(_)) => report.add(
+                    &format!("credentials.youtube.{name}"),
+                    Status::Error,
+                    None,
+                    "Set only one credential reference; channel validation should reject this configuration",
+                ),
             }
         }
     } else {

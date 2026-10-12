@@ -340,6 +340,28 @@ fn credentials_check_modes_and_types_without_opening_files() {
 }
 
 #[test]
+fn environment_credential_references_are_reported_without_being_read() {
+    let temp = workspace(
+        "[youtube]\nchannel_id = 'test'\n[credentials.youtube]\nclient_secret_env = 'YOUTUBE_CLIENT_SECRET_PATH'\ntoken_env = 'YOUTUBE_TOKEN_PATH'\n",
+    );
+    let output = command(temp.path())
+        .env("YOUTUBE_CLIENT_SECRET_PATH", "DO-NOT-DISCLOSE")
+        .env("YOUTUBE_TOKEN_PATH", "DO-NOT-DISCLOSE")
+        .args(["--format", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report = json(&output);
+    for name in [
+        "credentials.youtube.client_secret_env",
+        "credentials.youtube.token_env",
+    ] {
+        assert_eq!(check(&report, name)["status"], "warning");
+    }
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("DO-NOT-DISCLOSE"));
+}
+
+#[test]
 fn distinguishes_unused_providers_from_routed_unimplemented_providers() {
     for (routing, success, status) in [
         ("", true, "warning"),

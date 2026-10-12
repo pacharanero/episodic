@@ -84,3 +84,15 @@ Decided 2026-10-10.
 **Homebrew is deferred.** The house standard says to set `tap` and `publish-jobs` only once a maintained Homebrew channel exists, and there is no tap for this project yet. The shell, PowerShell, and MSI installers plus `cargo binstall` cover the platforms in the meantime. Revisit at the next distribution review; adding it later is two config lines and a tap token, and needs no change to the release model.
 
 See [roadmap.md](roadmap.md) R17 and `~/code/house-style/distribution.md`.
+
+## D11 - Configuration is versioned, but not silently migrated
+
+Decided 2026-10-11. Channel configuration has `schema_version = 1`; omitted legacy configurations are interpreted as version 1 for compatibility. This version of `eps` rejects every other version rather than guessing a migration, because configuration includes publication policy and credential locations where a permissive fallback could operate on the wrong files or destination.
+
+Credential references remain locations, not secret values. For the native YouTube adapter, each required credential file is named by exactly one config-relative `*_path` or `*_env`. The latter names an environment variable containing the path to an ignored local file. This preserves local-first, inspectable configuration while allowing managed shells and CI to keep file locations out of TOML. `eps doctor` never reads environment values or credential files for an environment reference.
+
+Consequences: a future incompatible schema needs an explicit migration command and decision. Native adapters that require value-style API tokens define their own reference form when a concrete integration needs one; no generic secret-value store is introduced speculatively.
+
+## D12 - Anthropic is the first native metadata provider
+
+Decided 2026-10-11. `provider = "anthropic"` calls the Messages API directly. Its `api_key_env` names an environment variable containing the API key; the value is resolved only when metadata is generated and is neither persisted nor inspected by `eps doctor`. Existing OpenAI and Ollama Cloud subscription workflows continue through `provider = "cli"` until their API and credential contracts are selected.

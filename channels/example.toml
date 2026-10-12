@@ -6,6 +6,10 @@
 # Production channel configuration lives in the channel's own workspace, never
 # in this repository. Use eps.toml at that workspace's root.
 
+# Omitted legacy configurations are treated as version 1. Set this explicitly
+# in new workspaces so an incompatible future version fails clearly.
+schema_version = 1
+
 [channel]
 id = "example-channel"
 name = "Example Channel"
@@ -27,6 +31,9 @@ default_profile = "main"
 [llm.profiles.main]
 provider = "anthropic"
 model = "claude-sonnet-5"
+# The variable's value is the key. It is resolved only during generation and
+# never stored in channel configuration or inspected by `eps doctor`.
+api_key_env = "ANTHROPIC_API_KEY"
 timeout_seconds = 180
 
 [llm.profiles.local]
@@ -146,6 +153,11 @@ audio_only_id = "PLexampleexampleexampleexampleexamp2"
 [credentials.youtube]
 client_secret_path = "client_secret.json"
 token_path = "youtube.token.json"
+
+# Alternatively, keep either file path outside configuration. Each environment
+# variable contains a path to an ignored local file, not secret material.
+# client_secret_env = "YOUTUBE_CLIENT_SECRET_PATH"
+# token_env = "YOUTUBE_TOKEN_PATH"
 
 [credentials.mastodon]
 env = "MASTODON_ACCESS_TOKEN"

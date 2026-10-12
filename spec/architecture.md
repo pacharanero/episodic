@@ -20,7 +20,7 @@ The filesystem remains the source of truth. The core is reusable by the CLI, a f
 - A hosted service, SaaS product, central database, or remote control plane.
 - A replacement for a video editor, OBS, recording platform, FFmpeg, Whisper, ImageMagick, or a language-model provider. YouTube operations use a native adapter rather than `yutu` orchestration.
 - Autonomous publication or social posting.
-- A separate command contract for CLI, GUI, and MCP.
+- Separate, divergent command contracts for CLI, GUI, and MCP.
 
 ## Command Shape
 
@@ -36,6 +36,8 @@ eps thumbnail frames|compose
 eps youtube plan-upload|upload|captions|thumbnail|playlist|publish|verify|reconcile
 eps cleanup plan|apply
 eps storage audit
+eps commands
+eps <command> --schema|--template
 eps doctor
 eps mcp
 eps completions
@@ -44,7 +46,7 @@ eps version
 
 Every command writes result data to stdout and progress, diagnostics, and errors to stderr. Text is the human default; JSON is the stable automation contract; YAML is a structured human-readable view. Bare `eps` and bare command families print useful help and exit successfully.
 
-This command map includes future surface: cleanup, storage audit, MCP, and a separate reconcile command are not implemented. Doctor provides local metadata-only prerequisite checks (R23). See the roadmap and live `eps --help` for status.
+`storage audit` is read-only. `cleanup plan` is read-only, and `cleanup apply` additionally requires `--apply` before it moves selected paths into episode-local quarantine. `eps commands`, `<command> --schema`, and `<command> --template` expose the command inventory and input contracts without loading a workspace. MCP and a separate reconcile command remain future surfaces. Doctor provides local metadata-only prerequisite checks (R23). See the roadmap and live `eps --help` for status.
 
 ## Configuration Selection
 

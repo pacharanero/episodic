@@ -98,17 +98,40 @@ pub fn credential_paths(
             workspace_root.join(path)
         }
     };
-    let client_secret = youtube
-        .client_secret_path
-        .as_deref()
-        .map(resolve)
-        .context("credentials.youtube.client_secret_path is not set")?;
-    let token = youtube
-        .token_path
-        .as_deref()
-        .map(resolve)
-        .context("credentials.youtube.token_path is not set")?;
+    let client_secret = credential_file_path(
+        youtube.client_secret_path.as_deref(),
+        youtube.client_secret_env.as_deref(),
+        "credentials.youtube.client_secret",
+        &resolve,
+    )?;
+    let token = credential_file_path(
+        youtube.token_path.as_deref(),
+        youtube.token_env.as_deref(),
+        "credentials.youtube.token",
+        &resolve,
+    )?;
     Ok((client_secret, token))
+}
+
+fn credential_file_path(
+    path: Option<&Path>,
+    environment: Option<&str>,
+    field: &str,
+    resolve: &impl Fn(&Path) -> std::path::PathBuf,
+) -> Result<std::path::PathBuf> {
+    match (path, environment) {
+        (Some(path), None) => Ok(resolve(path)),
+        (None, Some(environment)) => {
+            let value = std::env::var_os(environment)
+                .with_context(|| format!("{field}_env is not set: {environment}"))?;
+            if value.is_empty() {
+                bail!("{field}_env is set but empty: {environment}");
+            }
+            Ok(resolve(Path::new(&value)))
+        }
+        (None, None) => bail!("{field}_path or {field}_env is not set"),
+        (Some(_), Some(_)) => bail!("{field}_path and {field}_env cannot both be set"),
+    }
 }
 
 #[cfg(test)]
@@ -143,6 +166,25 @@ mod tests {
             let credentials = authorized_user(&secret, &token).unwrap();
             assert_eq!(credentials.client_id, "id");
             assert_eq!(credentials.refresh_token, "r");
+        }
+    }
+
+    #[test]
+    fn resolves_credential_file_paths_from_environment_references() {
+        let directory = tempfile::tempdir().unwrap();
+        let variable = format!("EPISODIC_TEST_TOKEN_PATH_{}", std::process::id());
+        unsafe {
+            std::env::set_var(&variable, "credentials/token.json");
+        }
+        let config: crate::channel::ChannelConfig = toml::from_str(&format!(
+            "[channel]\nid = 'test'\nname = 'Test'\ntimezone = 'UTC'\n[credentials.youtube]\nclient_secret_path = 'credentials/client.json'\ntoken_env = '{variable}'\n"
+        ))
+        .unwrap();
+        let paths = credential_paths(&config, directory.path()).unwrap();
+        assert_eq!(paths.0, directory.path().join("credentials/client.json"));
+        assert_eq!(paths.1, directory.path().join("credentials/token.json"));
+        unsafe {
+            std::env::remove_var(variable);
         }
     }
 

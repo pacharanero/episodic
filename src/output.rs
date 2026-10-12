@@ -18,7 +18,7 @@ pub enum OutputFormat {
     Yaml,
 }
 
-pub fn write<T: Serialize>(format: OutputFormat, value: &T, text: &str) -> Result<()> {
+pub fn write<T: Serialize + ?Sized>(format: OutputFormat, value: &T, text: &str) -> Result<()> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     match format {

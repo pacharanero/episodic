@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use crate::channel;
+use crate::command_registry::{self, Discovery};
 use crate::commands;
 use crate::output::OutputFormat;
 use crate::paths::tilde_pathbuf;
-use crate::thumbnail::ComposeRequest;
 use crate::youtube::publish;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
@@ -56,8 +56,13 @@ enum RootCommand {
         #[command(subcommand)]
         command: Option<AudioCommand>,
     },
-    /// Generate shell completion scripts.
-    Completions(CompletionsArgs),
+    /// Generate or install shell completion scripts.
+    Completions {
+        #[command(subcommand)]
+        command: Option<CompletionCommand>,
+    },
+    /// List machine-discoverable command contracts.
+    Commands,
     /// Check local workspace prerequisites without running tools or contacting services.
     Doctor,
     /// Inspect and validate episode state.
@@ -85,12 +90,22 @@ enum RootCommand {
         #[command(subcommand)]
         command: Option<TranscriptCommand>,
     },
+    /// Audit old episode media against the channel retention policy.
+    Storage {
+        #[command(subcommand)]
+        command: Option<StorageCommand>,
+    },
+    /// Quarantine disposable artefacts from one episode without deleting them.
+    Cleanup {
+        #[command(subcommand)]
+        command: Option<CleanupCommand>,
+    },
     /// Report the installed eps version.
     Version,
 }
 
 #[derive(Debug, Subcommand)]
-enum AudioCommand {
+pub(crate) enum AudioCommand {
     /// Measure loudness without changing anything.
     Analyse {
         /// Audio or video file.
@@ -102,7 +117,7 @@ enum AudioCommand {
 }
 
 #[derive(Debug, Subcommand)]
-enum MetadataCommand {
+pub(crate) enum MetadataCommand {
     /// Generate YouTube chapter markers from a transcript.
     Chapters(TranscriptTaskArgs),
     /// Generate the tag list from a transcript.
@@ -135,49 +150,49 @@ enum MetadataCommand {
 }
 
 #[derive(Debug, clap::Args)]
-struct TaskArgs {
+pub(crate) struct TaskArgs {
     /// Episode to take title, URL, chapters, and show notes from.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    episode: Option<PathBuf>,
+    pub(crate) episode: Option<PathBuf>,
 
     /// Write the result here instead of standard output.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    output: Option<PathBuf>,
+    pub(crate) output: Option<PathBuf>,
 
     /// Transcript to condense into the prompt.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    transcript: Option<PathBuf>,
+    pub(crate) transcript: Option<PathBuf>,
 
     /// Extra prompt variables, as NAME=VALUE.
     #[arg(long = "var", value_name = "NAME=VALUE")]
-    variables: Vec<String>,
+    pub(crate) variables: Vec<String>,
 
     /// Regenerate even if the output already exists.
     #[arg(long)]
-    force: bool,
+    pub(crate) force: bool,
 }
 
 #[derive(Debug, clap::Args)]
-struct TranscriptTaskArgs {
+pub(crate) struct TranscriptTaskArgs {
     /// Episode to take title, URL, chapters, and show notes from.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    episode: Option<PathBuf>,
+    pub(crate) episode: Option<PathBuf>,
 
     /// Whisper SRT transcript.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    transcript: PathBuf,
+    pub(crate) transcript: PathBuf,
 
     /// Write the result here instead of standard output.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    output: Option<PathBuf>,
+    pub(crate) output: Option<PathBuf>,
 
     /// Extra prompt variables, as NAME=VALUE.
     #[arg(long = "var", value_name = "NAME=VALUE")]
-    variables: Vec<String>,
+    pub(crate) variables: Vec<String>,
 
     /// Regenerate even if the output already exists.
     #[arg(long)]
-    force: bool,
+    pub(crate) force: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -256,7 +271,7 @@ struct UploadArgs {
 }
 
 #[derive(Debug, Subcommand)]
-enum ThumbnailCommand {
+pub(crate) enum ThumbnailCommand {
     /// Extract evenly spaced still frames for selection.
     Frames {
         /// Video to take frames from.
@@ -291,7 +306,7 @@ enum ThumbnailCommand {
 }
 
 #[derive(Debug, Subcommand)]
-enum TranscriptCommand {
+pub(crate) enum TranscriptCommand {
     /// Extract the standardised mono track used for transcription.
     Extract(MediaArgs),
     /// Transcribe audio into the srt, vtt, txt, json, and tsv family.
@@ -306,19 +321,57 @@ enum TranscriptCommand {
     },
 }
 
-#[derive(Debug, clap::Args)]
-struct MediaArgs {
-    /// Audio or video file.
-    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    input: PathBuf,
-
-    /// Output path. Defaults to the contract's name beside the input.
-    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    output: Option<PathBuf>,
+#[derive(Debug, Subcommand)]
+pub(crate) enum StorageCommand {
+    /// Report old media candidates across the selected workspace without changing anything.
+    Audit {
+        /// Lifecycle stage to inspect. Repeat for more than one stage.
+        #[arg(long = "stage")]
+        stages: Vec<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
-enum ChannelCommand {
+pub(crate) enum CleanupCommand {
+    /// Show selected episode artefacts that would be moved to quarantine.
+    Plan {
+        /// Episode directory or canonical metadata file.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+        episode: PathBuf,
+
+        /// Include ambiguous source media and editor projects in the plan.
+        #[arg(long)]
+        include_review: bool,
+    },
+    /// Move selected episode artefacts to its local quarantine. Requires --apply.
+    Apply {
+        /// Episode directory or canonical metadata file.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+        episode: PathBuf,
+
+        /// Include ambiguous source media and editor projects in the cleanup.
+        #[arg(long)]
+        include_review: bool,
+
+        /// Perform the move. Without this the command only reports the plan.
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+pub(crate) struct MediaArgs {
+    /// Audio or video file.
+    #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    pub(crate) input: PathBuf,
+
+    /// Output path. Defaults to the contract's name beside the input.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
+    pub(crate) output: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ChannelCommand {
     /// List the single selected workspace channel.
     List,
     /// Show the resolved channel configuration summary.
@@ -463,14 +516,37 @@ struct SetDraftArgs {
 }
 
 #[derive(Debug, clap::Args)]
-struct CompletionsArgs {
-    /// Shell to generate completions for.
-    #[arg(value_enum)]
-    shell: Shell,
-
+pub(crate) struct CompletionDirectoryArgs {
     /// Write the completion file into this directory instead of stdout.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::DirPath)]
-    directory: Option<PathBuf>,
+    pub(crate) directory: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum CompletionCommand {
+    /// Generate a bash completion script.
+    Bash(CompletionDirectoryArgs),
+    /// Generate a zsh completion script.
+    Zsh(CompletionDirectoryArgs),
+    /// Generate a fish completion script.
+    Fish(CompletionDirectoryArgs),
+    /// Generate a PowerShell completion script.
+    Powershell(CompletionDirectoryArgs),
+    /// Generate an elvish completion script.
+    Elvish(CompletionDirectoryArgs),
+    /// Install a completion script without editing shell startup files.
+    Install(CompletionInstallArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub(crate) struct CompletionInstallArgs {
+    /// Shell to install for. Defaults to the detected current shell.
+    #[arg(long, value_enum)]
+    pub(crate) shell: Option<Shell>,
+
+    /// Completion directory. Defaults to the shell's standard user directory.
+    #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::DirPath)]
+    pub(crate) directory: Option<PathBuf>,
 }
 
 pub fn run() -> Result<()> {
@@ -479,43 +555,39 @@ pub fn run() -> Result<()> {
         println!("eps {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    if let Some(discovery) = command_registry::discover(&args, &Cli::command()) {
+        return print_discovery(discovery);
+    }
 
     let cli = Cli::parse_from(args);
     match cli.command {
         None => print_root_help(),
         Some(RootCommand::Version) => commands::version::run(cli.format),
+        Some(RootCommand::Commands) => {
+            let registry = command_registry::Registry::from_clap(&Cli::command());
+            let text = registry
+                .commands()
+                .iter()
+                .map(|command| format!("{}\t{:?}", command.path.join(" "), command.safety))
+                .collect::<Vec<_>>()
+                .join("\n");
+            crate::output::write(cli.format, registry.commands(), &text)
+        }
         Some(RootCommand::Doctor) => commands::doctor::run(cli.config.as_deref(), cli.format),
-        Some(RootCommand::Completions(args)) => commands::completions::run(
-            args.shell,
-            args.directory.as_deref(),
-            cli.dry_run,
-            Cli::command(),
-        ),
+        Some(RootCommand::Completions { command: None }) => print_family_help("completions"),
+        Some(RootCommand::Completions {
+            command: Some(command),
+        }) => command_registry::run_completions(command, cli.dry_run, cli.format, Cli::command()),
         Some(RootCommand::Audio { command: None }) => print_family_help("audio"),
         Some(RootCommand::Audio {
-            command: Some(AudioCommand::Analyse { input }),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::media::analyse(&path, &input, cli.format)
-        }
-        Some(RootCommand::Audio {
-            command: Some(AudioCommand::Process(args)),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::media::process(
-                &path,
-                &args.input,
-                args.output.as_deref(),
-                cli.dry_run,
-                cli.format,
-            )
-        }
+            command: Some(command),
+        }) => command_registry::run_audio(command, cli.config.as_deref(), cli.dry_run, cli.format),
         Some(RootCommand::Metadata { command: None }) => print_family_help("metadata"),
         Some(RootCommand::Metadata {
             command: Some(command),
         }) => {
             let config = channel::resolve_path(cli.config.as_deref())?;
-            run_metadata(command, &config, cli.dry_run, cli.format)
+            command_registry::run_metadata(command, &config, cli.dry_run, cli.format)
         }
         Some(RootCommand::Youtube { command: None }) => print_family_help("youtube"),
         Some(RootCommand::Youtube {
@@ -581,76 +653,31 @@ pub fn run() -> Result<()> {
         }
         Some(RootCommand::Thumbnail { command: None }) => print_family_help("thumbnail"),
         Some(RootCommand::Thumbnail {
-            command: Some(ThumbnailCommand::Frames { video, count }),
-        }) => commands::media::frames(&video, count, cli.dry_run, cli.format),
-        Some(RootCommand::Thumbnail {
-            command:
-                Some(ThumbnailCommand::Compose {
-                    image,
-                    text,
-                    output,
-                    no_quotes,
-                    force,
-                }),
+            command: Some(command),
         }) => {
-            let config = channel::resolve_path(cli.config.as_deref())?;
-            commands::media::compose(
-                &config,
-                &ComposeRequest {
-                    image: &image,
-                    text: &text,
-                    output: output.as_deref(),
-                    no_quotes,
-                    force,
-                },
-                cli.dry_run,
-                cli.format,
-            )
+            command_registry::run_thumbnail(command, cli.config.as_deref(), cli.dry_run, cli.format)
         }
         Some(RootCommand::Transcript { command: None }) => print_family_help("transcript"),
         Some(RootCommand::Transcript {
-            command: Some(TranscriptCommand::Extract(args)),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::media::extract(
-                &path,
-                &args.input,
-                args.output.as_deref(),
-                cli.dry_run,
-                cli.format,
-            )
-        }
-        Some(RootCommand::Transcript {
-            command: Some(TranscriptCommand::Transcribe { input, output_dir }),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::media::transcribe(
-                &path,
-                &input,
-                output_dir.as_deref(),
-                cli.dry_run,
-                cli.format,
-            )
-        }
+            command: Some(command),
+        }) => command_registry::run_transcript(
+            command,
+            cli.config.as_deref(),
+            cli.dry_run,
+            cli.format,
+        ),
+        Some(RootCommand::Storage { command: None }) => print_family_help("storage"),
+        Some(RootCommand::Storage {
+            command: Some(command),
+        }) => command_registry::run_storage(command, cli.config.as_deref(), cli.format),
+        Some(RootCommand::Cleanup { command: None }) => print_family_help("cleanup"),
+        Some(RootCommand::Cleanup {
+            command: Some(command),
+        }) => command_registry::run_cleanup(command, cli.dry_run, cli.format),
         Some(RootCommand::Channel { command: None }) => print_family_help("channel"),
         Some(RootCommand::Channel {
-            command: Some(ChannelCommand::List),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::channel::list(&path, cli.format)
-        }
-        Some(RootCommand::Channel {
-            command: Some(ChannelCommand::Show),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::channel::show(&path, cli.format)
-        }
-        Some(RootCommand::Channel {
-            command: Some(ChannelCommand::Validate),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::channel::validate(&path, cli.format)
-        }
+            command: Some(command),
+        }) => command_registry::run_channel(command, cli.config.as_deref(), cli.format),
         Some(RootCommand::Episode { command: None }) => print_family_help("episode"),
         Some(RootCommand::Episode {
             command: Some(EpisodeCommand::Inspect { path }),
@@ -747,77 +774,13 @@ fn print_root_help() -> Result<()> {
     Ok(())
 }
 
-fn run_metadata(
-    command: MetadataCommand,
-    config: &Path,
-    dry_run: bool,
-    format: OutputFormat,
-) -> Result<()> {
-    use commands::metadata::Request;
-
-    let (task, transcript, output, variables, force, episode) = match &command {
-        MetadataCommand::Chapters(args) => (
-            "chapters",
-            Some(args.transcript.clone()),
-            args.output.clone(),
-            args.variables.clone(),
-            args.force,
-            args.episode.clone(),
-        ),
-        MetadataCommand::Tags(args) => (
-            "tags",
-            Some(args.transcript.clone()),
-            args.output.clone(),
-            args.variables.clone(),
-            args.force,
-            args.episode.clone(),
-        ),
-        MetadataCommand::Quote(args) => (
-            "thumbnail-quote",
-            Some(args.transcript.clone()),
-            args.output.clone(),
-            args.variables.clone(),
-            args.force,
-            args.episode.clone(),
-        ),
-        MetadataCommand::Description(args) => (
-            "youtube-description",
-            args.transcript.clone(),
-            args.output.clone(),
-            args.variables.clone(),
-            args.force,
-            args.episode.clone(),
-        ),
-        MetadataCommand::Social { task, args } => (
-            task.as_str(),
-            args.transcript.clone(),
-            args.output.clone(),
-            args.variables.clone(),
-            args.force,
-            args.episode.clone(),
-        ),
-        MetadataCommand::Check {
-            task,
-            input,
-            transcript,
-        } => {
-            return commands::metadata::check(config, task, input, transcript.as_deref(), format);
+fn print_discovery(discovery: Discovery) -> Result<()> {
+    match discovery {
+        Discovery::Schema(value) | Discovery::Template(value) => {
+            println!("{}", serde_json::to_string_pretty(&value)?);
         }
-    };
-
-    commands::metadata::generate(
-        &Request {
-            task,
-            config_path: config,
-            episode: episode.as_deref(),
-            transcript_path: transcript.as_deref(),
-            variables: &variables,
-            output: output.as_deref(),
-            force,
-            dry_run,
-        },
-        format,
-    )
+    }
+    Ok(())
 }
 
 /// Print a command family's help by asking clap, so the listing can never

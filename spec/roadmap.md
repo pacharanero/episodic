@@ -2,13 +2,20 @@
 
 Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item codes are stable and must not be renumbered or reused.
 
+## Product Boundary
+
+- `episodic` is local-first machinery for producing episodes and publishing them to YouTube from a channel workspace.
+- It will not become a hosted service, multi-user collaboration workspace, editorial calendar, or generic project-management tool.
+- It will not schedule or publish social posts, manage social-platform integrations, or compete on analytics, metrics, SEO, or title/thumbnail A/B testing. Local social drafts remain portable episode artefacts only.
+- YouTube is the only remote publication destination. The native adapter supports the production and publication workflow rather than replacing YouTube Studio's analytics or experimentation surfaces.
+
 ## Foundation
 
 - [x] **R1 - Establish the standalone project scaffold.** Create a reusable Rust library and `eps` binary, AGPL-3.0-or-later licensing, REUSE metadata, agent instructions, security policy, scripts, and committed dependency lockfile.
 - [x] **R2 - Separate generic and channel documentation.** Generic architecture, state, lifecycle, and artefact contracts live in `spec/`. This is now the standalone source repository (D9), containing only the schema, `channels/example.toml`, and redacted fixtures. Production configuration, channel documents, assets, credentials, and state remain in external workspaces; compatibility tooling cutover is tracked there.
-- [~] **R3 - Implement global CLI conventions.** Text/JSON/YAML output, helpful bare commands, version aliases, tilde expansion, SIGPIPE handling, global config/dry-run options, and basic completions exist. `--channel` was removed in D9. Completion installation and machine-discoverable command schemas remain.
-- [~] **R4 - Implement the channel engine.** The configuration schema is typed with strict parsing and semantic validation on normal loads. Selection is explicit `--config`, then PWD `eps.toml` only, with no environment/global/ancestor fallback or nested-layout heuristic (D9). Relative assets resolve against the normalized absolute config parent. `channel list` reports the one selected workspace. Tests cover implicit and explicit selection, invalid and missing configs, no ancestor traversal, and config-relative episode paths. Schema versioning and broader secret-reference support remain.
-- [~] **R5 - Implement read-only episode inspection.** The legacy Markdown adapter discovers managed fields and artefacts, validates local upload readiness, checks chapter coverage and thumbnail dimensions, and reports lifecycle inconsistencies. Lossless updates now exist separately in R6, and inspection shares the writer's fence-aware scan and can address a field as `Section / Label`. An episode path is resolved before its basename is taken, so `.`, `..`, and bare relative names all report the correct lifecycle stage (F6). More historical fixtures remain.
+- [x] **R3 - Implement global CLI conventions.** Text/JSON/YAML output, helpful bare commands, version aliases, tilde expansion, SIGPIPE handling, global config/dry-run options, shell completion generation and installation, and command schema/template discovery exist. `--channel` was removed in D9. `eps completions install` detects a supported shell or accepts `--shell`, writes only the standard user completion file, honours `--dry-run`, and never edits a shell startup file.
+- [x] **R4 - Implement the channel engine.** The configuration schema is typed with strict parsing and semantic validation on normal loads. Selection is explicit `--config`, then PWD `eps.toml` only, with no environment/global/ancestor fallback or nested-layout heuristic (D9). Relative assets resolve against the normalized absolute config parent. `channel list` reports the one selected workspace. `schema_version = 1` is explicit for new workspaces and implicit for legacy configurations; unsupported versions fail without automatic migration. YouTube credential files can be named by config-relative paths or environment variables containing those paths, but not both (D11). Tests cover implicit and explicit selection, invalid and missing configs, no ancestor traversal, config-relative episode paths, schema versions, and unambiguous credential references.
+- [x] **R5 - Implement read-only episode inspection.** The legacy Markdown adapter discovers managed fields and artefacts, validates local upload readiness, checks chapter coverage and thumbnail dimensions, and reports lifecycle inconsistencies. Lossless updates now exist separately in R6, and inspection shares the writer's fence-aware scan and can address a field as `Section / Label`. An episode path is resolved before its basename is taken, so `.`, `..`, and bare relative names all report the correct lifecycle stage (F6). The redacted fixture set covers planning, full publication, compact publication with plain `Playlists` and bare tags, and non-publishing internal records; the opt-in EDH corpus still verifies byte-for-byte round trips across all real documents.
 
 ## Core Workflow
 
@@ -43,7 +50,7 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   The parent workspace's `s/process` now composes these focused commands with `eps metadata chapters|tags|quote`, using JSON output to carry each canonical path into the next step. Its compatibility fixture proves the six-step order and the clean `<base>` naming when the source is `<base>.processed.mp4`.
 
-- [~] **R9 - Port generated metadata commands.** `eps metadata chapters|tags|quote|description|social` generate through a provider-neutral adapter, and `eps metadata check` validates an existing artefact without calling a model.
+- [x] **R9 - Port generated metadata commands.** `eps metadata chapters|tags|quote|description|social` generate through a provider-neutral adapter, and `eps metadata check` validates an existing artefact without calling a model.
 
   Generation, validation, and retry are one operation: nothing is written until an attempt satisfies its task contract, and a run that cannot produce a valid answer in three attempts fails loudly rather than writing the last bad one. Rejected attempts are reported even when a later one succeeds, so a model that is drifting is visible. An empty response is a failure, not an artefact. An existing artefact is never regenerated without `--force`, which protects human edits.
 
@@ -51,7 +58,7 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   Task contracts are configuration. `[metadata]` carries chapter counts and coverage, tag counts and any required final tag, description headings, quote counts, and per-platform social limits, so the EDH-specific values that were hardcoded in the shell validators are now channel policy.
 
-  Remaining: `provider = "cli"` is the only implemented transport. Native provider routing follows the same path as D8.
+  `provider = "cli"` supports subscription-backed local tools. `provider = "anthropic"` calls the native Messages API with an API key named by `api_key_env`; it uses the same bounded retry and validation path as CLI models. OpenAI and Ollama Cloud remain CLI-routed until their concrete API and credential contracts are selected (D12).
 
 - [x] **R10 - Implement YouTube planning, upload, verification, and reconciliation.** `eps youtube plan-upload|upload|verify|publish|captions|thumbnail|playlist` talk to the Data API through `google-youtube3` (D8). Authentication reuses the workspace's existing refresh token through the authorised-user flow, so no browser and no `yutu` are involved; a token with no refresh token is refused with an explanation rather than an obscure failure.
 
@@ -67,11 +74,11 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   External channel upload wrappers can invoke this native adapter directly and apply their own playlist policy. Their migration and real-episode acceptance are tracked in the channel workspace, not inferred from a parent checkout. `yutu` is not required by the engine.
 
-- [ ] **R12 - Implement retention audit and guarded cleanup.** Preserve exact upload sources and quarantine selected candidates before deletion.
+- [x] **R12 - Implement retention audit and guarded cleanup.** `eps storage audit` finds known candidate media older than the configured retention period, using the episode date rather than filesystem timestamps. `eps cleanup plan` distinguishes reproducible safe clutter from review-only source media, and `eps cleanup apply --apply` moves only selected candidates to `.episode-cleanup-trash/<timestamp>/` inside the episode. It never permanently deletes data. The `Uploaded File` record is authoritative where it names an in-folder file; legacy records conservatively protect the processed master or original video.
 
 ## Additional Surfaces
 
-- [ ] **R13 - Establish one command registry and JSON schemas.** Drive CLI discovery, templates, MCP tools, and GUI operations from the same typed definitions.
+- [~] **R13 - Establish one command registry and JSON schemas.** The registry derives every leaf command's stable slash-separated ID, safety class, JSON Schema Draft 2020-12 input contract, and fillable JSON template from the CLI declaration. `eps commands` lists the inventory; `<command> --schema` and `<command> --template` require neither a workspace nor credentials. Metadata, channel, retention, audio, thumbnail, and transcript commands now cross typed registry handler boundaries, establishing the route future GUI and MCP surfaces use. Remaining: migrate the other dispatch families from `cli.rs`, then make GUI and MCP execute only those handlers rather than acquiring parallel mutation paths.
 - [ ] **R14 - Implement `eps mcp`.** Expose read-only and planning operations normally; require explicit apply fields for mutations.
 - [ ] **R16 - Add Everything Discourse as the second real channel.** Deferred: work on that channel has not started (D6), and its configuration must not be invented ahead of a real episode. Until then, channel neutrality is defended by the D2 distribution boundary and the D4 core/integration split rather than by a second live channel.
 
@@ -83,6 +90,6 @@ Legend: `[x]` done, `[~]` in progress or partially done, `[ ]` not started. Item
 
   `release.yml` is kept by hand rather than generated, with the build matrix written out explicitly. The generated form fails `zizmor --strict-collection` on template injection and workflow-level `contents: write`; the hand-kept form passes the whole security collection with no findings, and `allow-dirty = ["ci"]` stops `dist generate` overwriting it. Keep the matrix in step with `workspace.metadata.dist`.
 
-  Remaining: nothing has run, because the repository has no remote yet, so the pipeline is unexercised and the README's CI and crates.io badges do not yet resolve. Publication also needs the `episodic-cli` name owned on crates.io with a trusted publisher configured for `publish-crates.yml`. Homebrew is deferred until there is a maintained tap (D10). Completion installation through `eps completions install` remains part of R3.
+   Remaining: the GitHub release and publication path has not yet run for a released version. Publication needs the `episodic-cli` crate name claimed on crates.io with a trusted publisher configured for `publish-crates.yml`. Homebrew is deferred until there is a maintained tap (D10).
 - [ ] **R18 - Define release readiness.** Complete one EDH episode end-to-end through `eps`, one Everything Discourse episode through configuration only, agent/MCP safety scenarios, and clean-machine doctor/install tests.
 - [x] **R23 - Implement standalone doctor diagnostics.** `eps doctor` reports canonical selected config/root, episode directory, runtime metadata task templates and routing, prompt support files, font, production tool lookup (including Whisper and ImageMagick fallbacks), CLI LLM executables, and YouTube credential presence/Unix permission bits. Text/JSON/YAML reports are emitted before nonzero exit for prerequisite errors; optional setup and unused unimplemented providers are warnings. Invalid explicit tool overrides do not fall back. Isolated temporary-workspace fixtures cover missing setup, overrides, routing, permissions, config selection, and non-execution/non-disclosure. No subprocesses, credential reads, downloads, or remote calls: versions are not checked, model availability and credential validity remain unverified. Effective access/ACLs, parent-directory permissions, and asset contents are outside this metadata-only check; release installation acceptance remains R18.

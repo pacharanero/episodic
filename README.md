@@ -1,6 +1,6 @@
 # episodic
 
-**Plan, produce, and publish video and podcast episodes from the command line.** One tool for the whole lifecycle of a YouTube channel: planning an episode, mastering its audio, transcribing it, writing its chapters, tags and description, building its thumbnail, uploading it, and keeping the record of what was published honest.
+**Produce and publish video and podcast episodes from local files.** A local-first command-line toolkit for planning an episode, mastering its audio, transcribing it, generating and validating its artefacts, publishing it to YouTube, and keeping the record of what was published honest.
 
 [![CI](https://github.com/pacharanero/episodic/actions/workflows/ci.yml/badge.svg)](https://github.com/pacharanero/episodic/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/episodic-cli.svg)](https://crates.io/crates/episodic-cli)
@@ -77,6 +77,8 @@ An `.msi` is attached to each release, and prebuilt binaries are published for m
 
 `eps` orchestrates tools you already have rather than reimplementing them, so install what you intend to use: **FFmpeg** for audio and frames, **Whisper** for transcription, **ImageMagick** for thumbnails, and a **language-model CLI** for generated metadata. Run `eps doctor` to see what is present and what is missing.
 
+Install shell completions with `eps completions install`. It detects the current shell, or use `eps completions install --shell zsh`. It writes only the completion file and prints any setup still needed; it never edits shell startup files. Use `eps completions bash|zsh|fish|powershell|elvish` to print a script for a custom setup or package manager.
+
 ## Quick start
 
 A channel is a directory with an `eps.toml` in it. The smallest useful one:
@@ -104,11 +106,11 @@ Every command takes `--format json` for scripting, and `--dry-run` to see exactl
 
 ## What it is
 
-A **local-first** toolkit. The filesystem is the source of truth: episode state, channel policy, generated metadata, and publication records are all ordinary files in your own directories. There is no database, no hosted control plane, and no account to create. Delete `eps` and your episodes are still there, still readable, still yours.
+A **local-first** production and YouTube-publication toolkit. The filesystem is the source of truth: episode state, channel policy, generated metadata, and publication records are all ordinary files in your own directories. There is no database, no hosted control plane, and no account to create. Delete `eps` and your episodes are still there, still readable, still yours.
 
 Adding a channel is a TOML file, not a code change. Editorial policy - chapter counts, tag limits, description headings, loudness targets, thumbnail fonts, playlist IDs - is configuration, so a second channel needs no new code.
 
-**What it is not:** a video editor, a recording platform, a transcription engine, a replacement for FFmpeg or Whisper or ImageMagick, or an autonomous publishing agent. It does not post to social platforms. It drives the tools that do the work, and it is careful about what it records as true.
+**What it is not:** a video editor, recording platform, transcription engine, replacement for FFmpeg, Whisper, or ImageMagick, or an autonomous publishing agent. It is not a SaaS workspace, editorial calendar, team-collaboration system, social scheduler, analytics or metrics dashboard, SEO tool, or A/B-testing service. It can generate local social drafts, but never posts or schedules them. YouTube is its only remote publication destination. It drives the tools that do the work, and it is careful about what it records as true.
 
 ## The episode lifecycle
 
@@ -143,6 +145,10 @@ Transcripts are clamped to the media before they are published, because Whisper 
 
 Uploads use the resumable endpoint, so an interrupted large upload resumes rather than restarting. **Uploads default to unlisted**; making a video public is a separate command.
 
+### Retention
+
+`eps storage audit` reports known media-retention candidates older than the channel's configured retention period, using the date in the episode directory rather than filesystem timestamps. `eps cleanup plan <episode>` identifies reproducible clutter and reports ambiguous source media; `eps cleanup apply <episode> --apply` moves only the selected artefacts into an episode-local quarantine. It never permanently deletes media, and the exact uploaded master is protected from the publication record.
+
 ## Safety
 
 The things that stop a tool like this from ruining an afternoon:
@@ -160,6 +166,8 @@ The things that stop a tool like this from ruining an afternoon:
 
 Configuration is selected by explicit `--config <path>` first, otherwise `eps.toml` in the current directory, and nothing else - no ancestor search, no environment variable, no global fallback. This is deliberately narrower than most tools: with several channels on one machine, the failure mode worth preventing is silently operating on the wrong one.
 
+Generated metadata may use `provider = "cli"`, or Anthropic's native Messages API with `provider = "anthropic"` and `api_key_env = "ANTHROPIC_API_KEY"`. The latter names an environment variable containing the key. `eps` resolves it only while generating metadata and `eps doctor` never reads it.
+
 ## Diagnostics
 
 `eps doctor` reports what is configured and what is installed: the selected config and workspace root, episode directory, FFmpeg and ffprobe, ImageMagick, Whisper, configured model CLIs, prompt templates, thumbnail font, and YouTube credential presence and permissions. Errors exit non-zero; absent optional setup is a warning.
@@ -168,9 +176,9 @@ It is deliberately conservative. It never executes a tool, reads a credential, r
 
 ## Status
 
-Early, but real. One full episode has been produced and uploaded with it end to end. The command surface above exists and is tested; what remains is listed in [`spec/roadmap.md`](spec/roadmap.md), and faults found in real use are tracked with reproduction steps in [`spec/defects.md`](spec/defects.md).
+Early, but real. One full episode has been produced and uploaded with it end to end. The command surface above exists and is tested; `eps commands`, `<command> --schema`, and `<command> --template` expose machine-readable contracts for future local GUI and MCP surfaces. What remains is listed in [`spec/roadmap.md`](spec/roadmap.md), and faults found in real use are tracked with reproduction steps in [`spec/defects.md`](spec/defects.md).
 
-Known gaps worth knowing before you adopt: generated metadata currently routes through a configured CLI (`provider = "cli"`) rather than a native API transport; retention audit and cleanup are unimplemented; and the MCP server is designed but not built.
+Known gaps worth knowing before you adopt: OpenAI and Ollama Cloud currently route through a configured CLI (`provider = "cli"`), while Anthropic has native support; command execution has not yet migrated from the CLI adapter into typed registry handlers; and the MCP server is designed but not built.
 
 ## Development
 

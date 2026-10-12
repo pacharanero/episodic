@@ -33,6 +33,7 @@ pub struct EpisodeFields {
     pub video_id: Option<String>,
     pub youtube_url: Option<String>,
     pub privacy_status: Option<String>,
+    pub uploaded_file: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,6 +123,7 @@ pub fn inspect(input: &Path) -> Result<EpisodeReport> {
         video_id: value(&values, "Video ID"),
         youtube_url: value(&values, "YouTube URL"),
         privacy_status: value(&values, "Privacy Status"),
+        uploaded_file: value(&values, "Uploaded File"),
     };
     let stage = lifecycle_stage(&episode_path);
     let artefacts = artefacts(&episode_path, &base);
