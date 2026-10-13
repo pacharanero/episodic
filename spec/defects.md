@@ -194,7 +194,7 @@ Worth noting as a class of fault rather than a one-off: three places had indepen
 
 ## F7 - `storage audit` and `cleanup plan` abort the whole stage on one episode with no metadata file
 
-- [ ] **Open.**
+- [x] **Fixed.**
 
 Found on 2026-10-12 running `eps storage audit --stage published` (and `edited`, `not-for-publishing`) against the real EDH back catalogue with `eps` built from `7b03e76`.
 

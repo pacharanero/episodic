@@ -38,6 +38,7 @@ pub struct AuditReport {
     pub retention_days: u32,
     pub stages: Vec<String>,
     pub candidates: Vec<Candidate>,
+    pub skipped: Vec<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,6 +60,12 @@ impl AuditReport {
         )];
         lines.extend(self.candidates.iter().map(candidate_text));
         lines.push(format!("Total: {} bytes", total_bytes(&self.candidates)));
+        if !self.skipped.is_empty() {
+            lines.push(format!(
+                "Skipped {} episode(s) without metadata",
+                self.skipped.len()
+            ));
+        }
         lines.join("\n")
     }
 }
@@ -91,12 +98,17 @@ pub fn audit(episodes_path: &Path, stages: &[String], retention_days: u32) -> Re
     };
     let today = current_day()?;
     let mut candidates = Vec::new();
+    let mut skipped = Vec::new();
     for stage in &stages {
         for episode_path in episode_directories(&episodes_path.join(stage))? {
             let Some((date, day)) = episode_date(&episode_path) else {
                 continue;
             };
             if today.saturating_sub(day) < i64::from(retention_days) {
+                continue;
+            }
+            if !has_metadata(&episode_path)? {
+                skipped.push(episode_path);
                 continue;
             }
             candidates.extend(candidates_for_episode(&episode_path, &date, false)?);
@@ -108,7 +120,20 @@ pub fn audit(episodes_path: &Path, stages: &[String], retention_days: u32) -> Re
         retention_days,
         stages,
         candidates,
+        skipped,
     })
+}
+
+fn has_metadata(episode_path: &Path) -> Result<bool> {
+    Ok(fs::read_dir(episode_path)?
+        .filter_map(|entry| entry.ok())
+        .any(|entry| {
+            entry
+                .path()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".episode-data.md"))
+        }))
 }
 
 pub fn cleanup_plan(episode_path: &Path, include_review: bool) -> Result<CleanupReport> {

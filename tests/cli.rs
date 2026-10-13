@@ -2127,6 +2127,10 @@ fn retention_audit_and_quarantine_preserve_the_uploaded_master() {
     )
     .unwrap();
     fs::write(episode.join(format!("{base}.wav")), b"audio").unwrap();
+    let missing_metadata = workspace
+        .root
+        .join("episodes/published/2020/2020.01.02-legacy");
+    fs::create_dir_all(&missing_metadata).unwrap();
 
     let audit = workspace.run(&["--format", "json", "storage", "audit"]);
     assert!(
@@ -2136,6 +2140,7 @@ fn retention_audit_and_quarantine_preserve_the_uploaded_master() {
     );
     let audit: Value = serde_json::from_slice(&audit.stdout).unwrap();
     let candidates = audit["candidates"].as_array().unwrap();
+    assert_eq!(audit["skipped"].as_array().unwrap().len(), 1);
     assert!(
         candidates
             .iter()
