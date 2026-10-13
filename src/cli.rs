@@ -3,17 +3,13 @@
 
 use crate::channel;
 use crate::command_registry::{self, Discovery};
-use crate::commands;
 use crate::output::OutputFormat;
 use crate::paths::tilde_pathbuf;
-use crate::youtube::publish;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 use std::ffi::OsString;
-use std::fs;
-use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -196,7 +192,7 @@ pub(crate) struct TranscriptTaskArgs {
 }
 
 #[derive(Debug, Subcommand)]
-enum YoutubeCommand {
+pub(crate) enum YoutubeCommand {
     /// Show what an upload would do, contacting nothing.
     PlanUpload(UploadArgs),
     /// Upload the episode. Requires --apply.
@@ -241,33 +237,33 @@ enum YoutubeCommand {
 }
 
 #[derive(Debug, clap::Args)]
-struct RepairArgs {
+pub(crate) struct RepairArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    episode: PathBuf,
+    pub(crate) episode: PathBuf,
 
     /// Perform the change. Without this the command only reports it.
     #[arg(long)]
-    apply: bool,
+    pub(crate) apply: bool,
 }
 
 #[derive(Debug, clap::Args)]
-struct UploadArgs {
+pub(crate) struct UploadArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    episode: PathBuf,
+    pub(crate) episode: PathBuf,
 
     /// Playlist IDs to add the video to.
     #[arg(long = "playlist", value_name = "PLAYLIST_ID")]
-    playlists: Vec<String>,
+    pub(crate) playlists: Vec<String>,
 
     /// Privacy for the new video. Defaults to the channel's, or unlisted.
     #[arg(long)]
-    privacy: Option<String>,
+    pub(crate) privacy: Option<String>,
 
     /// Perform the upload. Without this the command only reports the plan.
     #[arg(long)]
-    apply: bool,
+    pub(crate) apply: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -381,7 +377,7 @@ pub(crate) enum ChannelCommand {
 }
 
 #[derive(Debug, Subcommand)]
-enum EpisodeCommand {
+pub(crate) enum EpisodeCommand {
     /// Inspect local episode state without changing it.
     Inspect {
         /// Episode directory or canonical metadata file.
@@ -417,102 +413,102 @@ enum EpisodeCommand {
 }
 
 #[derive(Debug, clap::Args)]
-struct NewArgs {
+pub(crate) struct NewArgs {
     /// Episode date, as YYYY-MM-DD.
-    date: String,
+    pub(crate) date: String,
 
     /// Episode title in human form; the folder slug is derived from it.
-    title: String,
+    pub(crate) title: String,
 
     /// Guest name, when the episode has one.
     #[arg(long)]
-    guest: Option<String>,
+    pub(crate) guest: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]
-struct PromoteArgs {
+pub(crate) struct PromoteArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// Destination lifecycle stage.
-    stage: String,
+    pub(crate) stage: String,
 
     /// Override the lifecycle guards.
     #[arg(long)]
-    force: bool,
+    pub(crate) force: bool,
 }
 
 #[derive(Debug, clap::Args)]
-struct SetTagsArgs {
+pub(crate) struct SetTagsArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// Read the tags from a file instead of standard input.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    from_file: Option<PathBuf>,
+    pub(crate) from_file: Option<PathBuf>,
 }
 
 #[derive(Debug, clap::Args)]
-struct MarkPlaylistArgs {
+pub(crate) struct MarkPlaylistArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// Playlist ID, matched against the entries in the playlist section.
-    playlist: String,
+    pub(crate) playlist: String,
 
     /// Detail to append, for example 'Added 2026-08-07T09:00:00Z'.
     #[arg(long)]
-    note: Option<String>,
+    pub(crate) note: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]
-struct AddPlatformArgs {
+pub(crate) struct AddPlatformArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// Platform section to add, for example Mastodon.
-    platform: String,
+    pub(crate) platform: String,
 }
 
 #[derive(Debug, clap::Args)]
-struct SetArgs {
+pub(crate) struct SetArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// Field assignments, as 'Label=value'.
     #[arg(required = true, value_name = "LABEL=VALUE")]
-    assignments: Vec<String>,
+    pub(crate) assignments: Vec<String>,
 
     /// Enclosing heading, required when a label appears in several sections.
     #[arg(long)]
-    section: Option<String>,
+    pub(crate) section: Option<String>,
 
     /// Replace a field that already holds a value rather than a placeholder.
     #[arg(long)]
-    force: bool,
+    pub(crate) force: bool,
 }
 
 #[derive(Debug, clap::Args)]
-struct SetDraftArgs {
+pub(crate) struct SetDraftArgs {
     /// Episode directory or canonical metadata file.
     #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// Social platform section, for example Bluesky.
-    platform: String,
+    pub(crate) platform: String,
 
     /// Draft heading within the platform section.
     #[arg(long, default_value = "Draft")]
-    heading: String,
+    pub(crate) heading: String,
 
     /// Read the draft from a file instead of standard input.
     #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::FilePath)]
-    from_file: Option<PathBuf>,
+    pub(crate) from_file: Option<PathBuf>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -562,18 +558,11 @@ pub fn run() -> Result<()> {
     let cli = Cli::parse_from(args);
     match cli.command {
         None => print_root_help(),
-        Some(RootCommand::Version) => commands::version::run(cli.format),
-        Some(RootCommand::Commands) => {
-            let registry = command_registry::Registry::from_clap(&Cli::command());
-            let text = registry
-                .commands()
-                .iter()
-                .map(|command| format!("{}\t{:?}", command.path.join(" "), command.safety))
-                .collect::<Vec<_>>()
-                .join("\n");
-            crate::output::write(cli.format, registry.commands(), &text)
+        Some(RootCommand::Version) => command_registry::run_version(cli.format),
+        Some(RootCommand::Commands) => command_registry::run_commands(Cli::command(), cli.format),
+        Some(RootCommand::Doctor) => {
+            command_registry::run_doctor(cli.config.as_deref(), cli.format)
         }
-        Some(RootCommand::Doctor) => commands::doctor::run(cli.config.as_deref(), cli.format),
         Some(RootCommand::Completions { command: None }) => print_family_help("completions"),
         Some(RootCommand::Completions {
             command: Some(command),
@@ -593,63 +582,7 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Youtube {
             command: Some(command),
         }) => {
-            let config = channel::resolve_path(cli.config.as_deref())?;
-            match command {
-                YoutubeCommand::PlanUpload(args) => commands::youtube::plan_upload(
-                    &config,
-                    &args.episode,
-                    &args.playlists,
-                    args.privacy.as_deref(),
-                    cli.format,
-                ),
-                YoutubeCommand::Upload(args) => commands::youtube::upload(
-                    &config,
-                    &args.episode,
-                    &args.playlists,
-                    args.privacy.as_deref(),
-                    args.apply && !cli.dry_run,
-                    cli.format,
-                ),
-                YoutubeCommand::Verify { episode } => {
-                    commands::youtube::verify(&config, &episode, cli.format)
-                }
-                YoutubeCommand::Captions(args) => commands::youtube::repair(
-                    &config,
-                    &args.episode,
-                    publish::RepairKind::Captions,
-                    args.apply && !cli.dry_run,
-                    cli.format,
-                ),
-                YoutubeCommand::Thumbnail(args) => commands::youtube::repair(
-                    &config,
-                    &args.episode,
-                    publish::RepairKind::Thumbnail,
-                    args.apply && !cli.dry_run,
-                    cli.format,
-                ),
-                YoutubeCommand::Playlist {
-                    episode,
-                    playlist,
-                    apply,
-                } => commands::youtube::repair(
-                    &config,
-                    &episode,
-                    publish::RepairKind::Playlist(playlist),
-                    apply && !cli.dry_run,
-                    cli.format,
-                ),
-                YoutubeCommand::Publish {
-                    episode,
-                    privacy,
-                    apply,
-                } => commands::youtube::publish_video(
-                    &config,
-                    &episode,
-                    &privacy,
-                    apply && !cli.dry_run,
-                    cli.format,
-                ),
-            }
+            command_registry::run_youtube(command, cli.config.as_deref(), cli.dry_run, cli.format)
         }
         Some(RootCommand::Thumbnail { command: None }) => print_family_help("thumbnail"),
         Some(RootCommand::Thumbnail {
@@ -680,90 +613,9 @@ pub fn run() -> Result<()> {
         }) => command_registry::run_channel(command, cli.config.as_deref(), cli.format),
         Some(RootCommand::Episode { command: None }) => print_family_help("episode"),
         Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::Inspect { path }),
-        }) => commands::episode::inspect(&path, cli.format),
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::Validate { path }),
-        }) => commands::episode::validate(&path, cli.format),
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::Set(args)),
-        }) => commands::episode::set(
-            &args.path,
-            &args.assignments,
-            args.section.as_deref(),
-            args.force,
-            cli.dry_run,
-            cli.format,
-        ),
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::SetDraft(args)),
+            command: Some(command),
         }) => {
-            let text = read_input(args.from_file.as_deref(), "draft")?;
-            commands::episode::set_draft(
-                &args.path,
-                &args.platform,
-                &args.heading,
-                &text,
-                cli.dry_run,
-                cli.format,
-            )
-        }
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::SetTags(args)),
-        }) => {
-            let tags = read_input(args.from_file.as_deref(), "tags")?;
-            commands::episode::set_tags(&args.path, &tags, cli.dry_run, cli.format)
-        }
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::MarkPlaylist(args)),
-        }) => commands::episode::mark_playlist(
-            &args.path,
-            &args.playlist,
-            args.note.as_deref(),
-            cli.dry_run,
-            cli.format,
-        ),
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::AddPlatform(args)),
-        }) => commands::episode::add_platform(&args.path, &args.platform, cli.dry_run, cli.format),
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::New(args)),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::episode::new(
-                &path,
-                &args.date,
-                &args.title,
-                args.guest.as_deref(),
-                cli.dry_run,
-                cli.format,
-            )
-        }
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::List { stage }),
-        }) => {
-            let path = channel::resolve_path(cli.config.as_deref())?;
-            commands::episode::list(&path, stage.as_deref(), cli.format)
-        }
-        Some(RootCommand::Episode {
-            command: Some(EpisodeCommand::Promote(args)),
-        }) => {
-            commands::episode::promote(&args.path, &args.stage, args.force, cli.dry_run, cli.format)
-        }
-    }
-}
-
-/// Read command input from a file or standard input.
-fn read_input(from_file: Option<&Path>, what: &str) -> Result<String> {
-    match from_file {
-        Some(path) => fs::read_to_string(path)
-            .with_context(|| format!("could not read {what} from {}", path.display())),
-        None => {
-            let mut text = String::new();
-            io::stdin()
-                .read_to_string(&mut text)
-                .with_context(|| format!("could not read {what} from standard input"))?;
-            Ok(text)
+            command_registry::run_episode(command, cli.config.as_deref(), cli.dry_run, cli.format)
         }
     }
 }

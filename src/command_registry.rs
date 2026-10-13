@@ -9,17 +9,20 @@
 
 use crate::channel;
 use crate::cli::{
-    AudioCommand, ChannelCommand, CleanupCommand, CompletionCommand, MetadataCommand,
-    StorageCommand, ThumbnailCommand, TranscriptCommand,
+    AudioCommand, ChannelCommand, CleanupCommand, CompletionCommand, EpisodeCommand,
+    MetadataCommand, StorageCommand, ThumbnailCommand, TranscriptCommand, YoutubeCommand,
 };
 use crate::commands;
 use crate::output::OutputFormat;
 use crate::thumbnail::ComposeRequest;
-use anyhow::Result;
+use crate::youtube::publish;
+use anyhow::{Context, Result};
 use clap::{ArgAction, Command};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use std::ffi::OsString;
+use std::fs;
+use std::io::{self, Read};
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -66,6 +69,25 @@ impl Registry {
 pub enum Discovery {
     Schema(Value),
     Template(Value),
+}
+
+pub(crate) fn run_version(format: OutputFormat) -> Result<()> {
+    commands::version::run(format)
+}
+
+pub(crate) fn run_commands(clap: Command, format: OutputFormat) -> Result<()> {
+    let registry = Registry::from_clap(&clap);
+    let text = registry
+        .commands()
+        .iter()
+        .map(|command| format!("{}\t{:?}", command.path.join(" "), command.safety))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::output::write(format, registry.commands(), &text)
+}
+
+pub(crate) fn run_doctor(config: Option<&Path>, format: OutputFormat) -> Result<()> {
+    commands::doctor::run(config, format)
 }
 
 /// Execute metadata commands from their typed registry boundary. Other command
@@ -289,6 +311,143 @@ pub(crate) fn run_audio(
             dry_run,
             format,
         ),
+    }
+}
+
+pub(crate) fn run_episode(
+    command: EpisodeCommand,
+    config: Option<&Path>,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    match command {
+        EpisodeCommand::Inspect { path } => commands::episode::inspect(&path, format),
+        EpisodeCommand::Validate { path } => commands::episode::validate(&path, format),
+        EpisodeCommand::Set(args) => commands::episode::set(
+            &args.path,
+            &args.assignments,
+            args.section.as_deref(),
+            args.force,
+            dry_run,
+            format,
+        ),
+        EpisodeCommand::SetDraft(args) => {
+            let text = read_input(args.from_file.as_deref(), "draft")?;
+            commands::episode::set_draft(
+                &args.path,
+                &args.platform,
+                &args.heading,
+                &text,
+                dry_run,
+                format,
+            )
+        }
+        EpisodeCommand::SetTags(args) => {
+            let tags = read_input(args.from_file.as_deref(), "tags")?;
+            commands::episode::set_tags(&args.path, &tags, dry_run, format)
+        }
+        EpisodeCommand::MarkPlaylist(args) => commands::episode::mark_playlist(
+            &args.path,
+            &args.playlist,
+            args.note.as_deref(),
+            dry_run,
+            format,
+        ),
+        EpisodeCommand::AddPlatform(args) => {
+            commands::episode::add_platform(&args.path, &args.platform, dry_run, format)
+        }
+        EpisodeCommand::New(args) => {
+            let path = channel::resolve_path(config)?;
+            commands::episode::new(
+                &path,
+                &args.date,
+                &args.title,
+                args.guest.as_deref(),
+                dry_run,
+                format,
+            )
+        }
+        EpisodeCommand::List { stage } => {
+            let path = channel::resolve_path(config)?;
+            commands::episode::list(&path, stage.as_deref(), format)
+        }
+        EpisodeCommand::Promote(args) => {
+            commands::episode::promote(&args.path, &args.stage, args.force, dry_run, format)
+        }
+    }
+}
+
+/// Read command input from a file or standard input.
+fn read_input(from_file: Option<&Path>, what: &str) -> Result<String> {
+    match from_file {
+        Some(path) => fs::read_to_string(path)
+            .with_context(|| format!("could not read {what} from {}", path.display())),
+        None => {
+            let mut text = String::new();
+            io::stdin()
+                .read_to_string(&mut text)
+                .with_context(|| format!("could not read {what} from standard input"))?;
+            Ok(text)
+        }
+    }
+}
+
+pub(crate) fn run_youtube(
+    command: YoutubeCommand,
+    config: Option<&Path>,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let config = channel::resolve_path(config)?;
+    match command {
+        YoutubeCommand::PlanUpload(args) => commands::youtube::plan_upload(
+            &config,
+            &args.episode,
+            &args.playlists,
+            args.privacy.as_deref(),
+            format,
+        ),
+        YoutubeCommand::Upload(args) => commands::youtube::upload(
+            &config,
+            &args.episode,
+            &args.playlists,
+            args.privacy.as_deref(),
+            args.apply && !dry_run,
+            format,
+        ),
+        YoutubeCommand::Verify { episode } => commands::youtube::verify(&config, &episode, format),
+        YoutubeCommand::Captions(args) => commands::youtube::repair(
+            &config,
+            &args.episode,
+            publish::RepairKind::Captions,
+            args.apply && !dry_run,
+            format,
+        ),
+        YoutubeCommand::Thumbnail(args) => commands::youtube::repair(
+            &config,
+            &args.episode,
+            publish::RepairKind::Thumbnail,
+            args.apply && !dry_run,
+            format,
+        ),
+        YoutubeCommand::Playlist {
+            episode,
+            playlist,
+            apply,
+        } => commands::youtube::repair(
+            &config,
+            &episode,
+            publish::RepairKind::Playlist(playlist),
+            apply && !dry_run,
+            format,
+        ),
+        YoutubeCommand::Publish {
+            episode,
+            privacy,
+            apply,
+        } => {
+            commands::youtube::publish_video(&config, &episode, &privacy, apply && !dry_run, format)
+        }
     }
 }
 
