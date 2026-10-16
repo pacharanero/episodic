@@ -11,6 +11,7 @@ pub mod document;
 pub mod episode;
 pub mod lifecycle;
 pub mod llm;
+pub mod mcp;
 pub mod media;
 pub mod output;
 pub mod paths;

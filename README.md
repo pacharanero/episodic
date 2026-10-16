@@ -102,7 +102,7 @@ eps episode new 2026-09-15 'First episode'
 eps episode list
 ```
 
-Every command takes `--format json` for scripting, and `--dry-run` to see exactly what would happen without doing it.
+Every command takes `--format json` for scripting, and `--dry-run` to see exactly what would happen without doing it. `eps mcp` exposes the same commands to an MCP client over standard input/output; start it from a channel workspace or pass `--config /path/to/eps.toml` before `mcp`. MCP mutations require an explicit `apply: true` input field, including local writes, and remote or destructive commands retain their normal apply safeguards.
 
 ## What it is
 
@@ -178,7 +178,7 @@ It is deliberately conservative. It never executes a tool, reads a credential, r
 
 Early, but real. One full episode has been produced and uploaded with it end to end. The command surface above exists and is tested; `eps commands`, `<command> --schema`, and `<command> --template` expose machine-readable contracts for future local GUI and MCP surfaces. What remains is listed in [`spec/roadmap.md`](spec/roadmap.md), and faults found in real use are tracked with reproduction steps in [`spec/defects.md`](spec/defects.md).
 
-Known gaps worth knowing before you adopt: OpenAI and Ollama Cloud currently route through a configured CLI (`provider = "cli"`), while Anthropic has native support; command execution has not yet migrated from the CLI adapter into typed registry handlers; and the MCP server is designed but not built.
+Known gaps worth knowing before you adopt: OpenAI and Ollama Cloud currently route through a configured CLI (`provider = "cli"`), while Anthropic has native support. Release readiness still needs a second real channel, MCP safety scenarios, and clean-machine installation evidence.
 
 ## Development
 

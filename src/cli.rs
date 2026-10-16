@@ -61,6 +61,8 @@ enum RootCommand {
     Commands,
     /// Check local workspace prerequisites without running tools or contacting services.
     Doctor,
+    /// Serve the command registry over the Model Context Protocol on standard I/O.
+    Mcp,
     /// Inspect and validate episode state.
     Episode {
         #[command(subcommand)]
@@ -563,6 +565,7 @@ pub fn run() -> Result<()> {
         Some(RootCommand::Doctor) => {
             command_registry::run_doctor(cli.config.as_deref(), cli.format)
         }
+        Some(RootCommand::Mcp) => crate::mcp::run(cli.config, cli.dry_run),
         Some(RootCommand::Completions { command: None }) => print_family_help("completions"),
         Some(RootCommand::Completions {
             command: Some(command),

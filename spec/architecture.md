@@ -46,7 +46,7 @@ eps version
 
 Every command writes result data to stdout and progress, diagnostics, and errors to stderr. Text is the human default; JSON is the stable automation contract; YAML is a structured human-readable view. Bare `eps` and bare command families print useful help and exit successfully.
 
-`storage audit` is read-only. `cleanup plan` is read-only, and `cleanup apply` additionally requires `--apply` before it moves selected paths into episode-local quarantine. `eps commands`, `<command> --schema`, and `<command> --template` expose the command inventory and input contracts without loading a workspace. MCP and a separate reconcile command remain future surfaces. Doctor provides local metadata-only prerequisite checks (R23). See the roadmap and live `eps --help` for status.
+`storage audit` is read-only. `cleanup plan` is read-only, and `cleanup apply` additionally requires `--apply` before it moves selected paths into episode-local quarantine. `eps commands`, `<command> --schema`, and `<command> --template` expose the command inventory and input contracts without loading a workspace. `eps mcp` serves the same registry over stdio; a mutating tool call must state `apply: true`, and remote or destructive commands retain their native apply gate. A separate reconcile command remains future work. Doctor provides local metadata-only prerequisite checks (R23). See the roadmap and live `eps --help` for status.
 
 ## Configuration Selection
 
@@ -89,4 +89,4 @@ Adapters must expose the command and version used, redact secrets, and return us
 
 ## Future Surfaces
 
-`eps mcp` must consume the same command registry, plans, schemas, and safety gates as the CLI. It may not bypass `--apply` semantics or write episode files directly behind the engine's back. Separate filesystem/frontmatter visualization tools may read lifecycle state without becoming part of the engine.
+`eps mcp` consumes the same command registry, plans, schemas, and safety gates as the CLI. It launches the current executable with JSON output for each tool call, keeping protocol frames isolated while preserving the CLI parser and typed registry route. It may not bypass `--apply` semantics or write episode files directly behind the engine's back. Separate filesystem/frontmatter visualization tools may read lifecycle state without becoming part of the engine.

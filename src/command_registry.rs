@@ -34,7 +34,7 @@ pub enum Safety {
     DestructiveLocal,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct CommandDefinition {
     pub id: String,
     pub path: Vec<String>,
@@ -493,6 +493,9 @@ fn command_path_without_global_options(args: &[OsString]) -> Option<Vec<String>>
 
 fn collect(command: &Command, parent: &[String], definitions: &mut Vec<CommandDefinition>) {
     for child in command.get_subcommands() {
+        if child.get_name() == "mcp" {
+            continue;
+        }
         let mut path = parent.to_vec();
         path.push(child.get_name().to_owned());
         if child.has_subcommands() {
@@ -507,6 +510,7 @@ fn definition(command: &Command, path: Vec<String>) -> CommandDefinition {
     let mut properties = Map::new();
     let mut required = Vec::new();
     let mut template = Map::new();
+    let mut positional_index = 0;
     for argument in command.get_arguments() {
         if argument.is_hide_set() {
             continue;
@@ -515,7 +519,12 @@ fn definition(command: &Command, path: Vec<String>) -> CommandDefinition {
             .get_long()
             .unwrap_or_else(|| argument.get_id().as_str())
             .to_owned();
-        let schema = argument_schema(argument);
+        let positional = argument.get_long().is_none().then(|| {
+            let index = positional_index;
+            positional_index += 1;
+            index
+        });
+        let schema = argument_schema(argument, positional);
         if argument.is_required_set() {
             required.push(Value::String(name.clone()));
         }
@@ -550,7 +559,7 @@ fn definition(command: &Command, path: Vec<String>) -> CommandDefinition {
     }
 }
 
-fn argument_schema(argument: &clap::Arg) -> Value {
+fn argument_schema(argument: &clap::Arg, positional: Option<usize>) -> Value {
     let description = argument.get_help().map(ToString::to_string);
     let mut schema = match argument.get_action() {
         ArgAction::SetTrue | ArgAction::SetFalse => json!({ "type": "boolean" }),
@@ -562,6 +571,12 @@ fn argument_schema(argument: &clap::Arg) -> Value {
             .as_object_mut()
             .unwrap()
             .insert("description".to_owned(), Value::String(description));
+    }
+    if let Some(index) = positional {
+        schema.as_object_mut().unwrap().insert(
+            "x-episodic-positional".to_owned(),
+            Value::Number(index.into()),
+        );
     }
     schema
 }
