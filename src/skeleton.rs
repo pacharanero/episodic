@@ -229,6 +229,7 @@ fn episode_data(
         .and_then(|youtube| youtube.default_privacy.as_deref())
         .unwrap_or("unlisted");
     out.push_str(&format!("- **Privacy Status**: [{privacy}/public]\n"));
+    out.push_str("- **Description Updated**: [To be added]\n");
     out.push_str(&format!("- **Upload Date**: {PLACEHOLDER}\n"));
     out.push_str(&format!("- **Captions**: {PLACEHOLDER}\n"));
     if let Some(youtube) = &config.youtube {

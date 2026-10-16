@@ -209,6 +209,8 @@ pub(crate) enum YoutubeCommand {
     Captions(RepairArgs),
     /// Set the episode's thumbnail. Requires --apply.
     Thumbnail(RepairArgs),
+    /// Replace the video's description from the local formatted description. Requires --apply.
+    Description(RepairArgs),
     /// Add the episode to a playlist. Requires --apply.
     Playlist {
         /// Episode directory or canonical metadata file.

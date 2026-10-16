@@ -430,6 +430,12 @@ pub(crate) fn run_youtube(
             args.apply && !dry_run,
             format,
         ),
+        YoutubeCommand::Description(args) => commands::youtube::repair_description(
+            &config,
+            &args.episode,
+            args.apply && !dry_run,
+            format,
+        ),
         YoutubeCommand::Playlist {
             episode,
             playlist,
@@ -598,7 +604,7 @@ fn safety(path: &[String]) -> Safety {
     {
         [
             "youtube",
-            "upload" | "captions" | "thumbnail" | "playlist" | "publish",
+            "upload" | "captions" | "thumbnail" | "description" | "playlist" | "publish",
         ] => Safety::RemoteWrite,
         ["cleanup", "apply"] => Safety::DestructiveLocal,
         ["audio", "process"]

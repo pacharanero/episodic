@@ -155,6 +155,54 @@ impl Document {
         }))
     }
 
+    /// Set a managed field, adding it beneath an existing section when a legacy
+    /// record predates that field.
+    pub fn set_or_add_field(
+        &mut self,
+        label: &str,
+        section: &str,
+        value: &str,
+        force: bool,
+    ) -> Result<Option<Change>> {
+        match self.set_field(label, Some(section), value, force) {
+            Ok(change) => Ok(change),
+            Err(error) if error.to_string().starts_with("no '") => {
+                let heading = self.locate_heading(section, None)?;
+                let mut index = self
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .skip(heading + 1)
+                    .find_map(|(index, line)| parse_heading(&line.text).map(|_| index))
+                    .unwrap_or(self.lines.len());
+                while index > heading + 1 && self.lines[index - 1].text.trim().is_empty() {
+                    index -= 1;
+                }
+                let terminator = self
+                    .lines
+                    .iter()
+                    .find(|line| !line.terminator.is_empty())
+                    .map(|line| line.terminator.clone())
+                    .unwrap_or_else(|| "\n".to_owned());
+                self.lines.insert(
+                    index,
+                    Line {
+                        text: format!("- **{label}**: {value}"),
+                        terminator,
+                    },
+                );
+                Ok(Some(Change {
+                    section: Some(section.to_owned()),
+                    label: label.to_owned(),
+                    from: "[Not recorded]".to_owned(),
+                    to: value.to_owned(),
+                    line: index + 1,
+                }))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Replace the fenced draft block under `#### <heading>` within a platform
     /// section, leaving the fence markers and all surrounding prose untouched.
     pub fn set_draft(

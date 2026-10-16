@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 pub struct VideoState {
     pub id: String,
     pub title: Option<String>,
+    pub description: Option<String>,
     pub privacy_status: Option<String>,
     pub published_at: Option<String>,
 }
@@ -50,6 +51,7 @@ pub trait Destination {
 
     fn upload_video(&self, request: &UploadRequest) -> Result<String>;
     fn set_privacy(&self, video_id: &str, privacy: &str) -> Result<()>;
+    fn set_description(&self, video_id: &str, description: &str) -> Result<()>;
     fn set_thumbnail(&self, video_id: &str, image: &Path) -> Result<()>;
     fn upload_caption(
         &self,
@@ -157,6 +159,7 @@ pub mod fake {
             self.videos.borrow_mut().push(VideoState {
                 id: id.clone(),
                 title: Some(request.title.clone()),
+                description: Some(request.description.clone()),
                 privacy_status: Some(request.privacy_status.clone()),
                 published_at: None,
             });
@@ -168,6 +171,16 @@ pub mod fake {
             for video in self.videos.borrow_mut().iter_mut() {
                 if video.id == video_id {
                     video.privacy_status = Some(privacy.to_owned());
+                }
+            }
+            Ok(())
+        }
+
+        fn set_description(&self, video_id: &str, description: &str) -> Result<()> {
+            self.guard("set_description")?;
+            for video in self.videos.borrow_mut().iter_mut() {
+                if video.id == video_id {
+                    video.description = Some(description.to_owned());
                 }
             }
             Ok(())

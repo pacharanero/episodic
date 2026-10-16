@@ -280,6 +280,37 @@ pub struct RepairPlan {
     pub language: String,
 }
 
+/// A comparison between the local formatted description and the live video.
+#[derive(Debug, Serialize)]
+pub struct DescriptionRepairPlan {
+    pub episode: PathBuf,
+    pub base: String,
+    pub video_id: String,
+    pub local_path: PathBuf,
+    pub current: String,
+    pub proposed: String,
+    pub changed: bool,
+}
+
+impl DescriptionRepairPlan {
+    pub fn as_text(&self) -> String {
+        if !self.changed {
+            return format!(
+                "Description repair plan for {}\n  Video: {}\n  No change: the local draft already matches YouTube.",
+                self.base, self.video_id
+            );
+        }
+        format!(
+            "Description repair plan for {}\n  Video: {}\n  Local draft: {}\n\n--- Current YouTube description\n{}\n--- Proposed local description\n{}",
+            self.base,
+            self.video_id,
+            self.local_path.display(),
+            self.current,
+            self.proposed,
+        )
+    }
+}
+
 impl RepairPlan {
     pub fn as_text(&self) -> String {
         let action = match &self.kind {
@@ -336,6 +367,37 @@ pub fn plan_repair(
         kind,
         asset,
         language,
+    })
+}
+
+/// Read the live description and compare it with the local formatted draft.
+pub fn plan_description_repair(
+    destination: &dyn Destination,
+    episode_path: &Path,
+) -> Result<DescriptionRepairPlan> {
+    let report = episode::inspect(episode_path)?;
+    let video_id = report
+        .fields
+        .video_id
+        .context("this episode has no recorded video ID")?;
+    let local_path = report
+        .episode_path
+        .join(format!("{}.youtube-description.txt", report.base));
+    let proposed = std::fs::read_to_string(&local_path)
+        .with_context(|| format!("could not read local description {}", local_path.display()))?;
+    let current = destination
+        .video(&video_id)?
+        .with_context(|| format!("no video with ID {video_id} exists on the destination"))?
+        .description
+        .unwrap_or_default();
+    Ok(DescriptionRepairPlan {
+        episode: report.episode_path,
+        base: report.base,
+        video_id,
+        local_path,
+        changed: current != proposed,
+        current,
+        proposed,
     })
 }
 
@@ -404,6 +466,40 @@ pub fn apply_repair(
     Ok(outcome)
 }
 
+/// Replace a live description only after its plan showed a difference.
+pub fn apply_description_repair(
+    destination: &dyn Destination,
+    plan: &DescriptionRepairPlan,
+    timestamp: &str,
+    confirmation: &Confirmation,
+) -> Result<Outcome> {
+    let mut outcome = Outcome {
+        video_id: Some(plan.video_id.clone()),
+        ..Outcome::default()
+    };
+    if !plan.changed {
+        outcome.confirmed.push("description unchanged".to_owned());
+        return Ok(outcome);
+    }
+    destination.set_description(&plan.video_id, &plan.proposed)?;
+    match confirmation.poll(|| {
+        destination.video(&plan.video_id).map(|video| {
+            video.and_then(|video| {
+                (video.description.as_deref() == Some(&plan.proposed)).then_some(())
+            })
+        })
+    }) {
+        Confirmed::Yes(()) => {
+            outcome.confirmed.push("description".to_owned());
+            record_description_repair(plan, timestamp, &mut outcome);
+        }
+        Confirmed::NotYet(reason) => outcome
+            .unconfirmed
+            .push(format!("description updated: {reason}")),
+    }
+    Ok(outcome)
+}
+
 fn repair_metadata_path(plan: &RepairPlan) -> PathBuf {
     plan.episode.join(format!("{}.episode-data.md", plan.base))
 }
@@ -417,6 +513,20 @@ fn record_repair_field(plan: &RepairPlan, label: &str, value: &str, outcome: &mu
         && document.write().is_ok()
     {
         outcome.recorded.push(label.to_owned());
+    }
+}
+
+fn record_description_repair(plan: &DescriptionRepairPlan, timestamp: &str, outcome: &mut Outcome) {
+    let path = plan.episode.join(format!("{}.episode-data.md", plan.base));
+    let Ok(mut document) = Document::read(&path) else {
+        return;
+    };
+    if document
+        .set_or_add_field("Description Updated", "Video", timestamp, true)
+        .is_ok_and(|change| change.is_some())
+        && document.write().is_ok()
+    {
+        outcome.recorded.push("Description Updated".to_owned());
     }
 }
 
@@ -833,7 +943,7 @@ pub fn verify(
 mod tests {
     use super::*;
     use crate::youtube::fake::FakeDestination;
-    use std::collections::BTreeSet;
+    use std::{cell::RefCell, collections::BTreeSet};
 
     const BASE: &str = "2026.08.07-fixture";
     const PLAYLIST: &str = "PLfixturebinge";
@@ -1033,6 +1143,19 @@ mod tests {
         }
     }
 
+    fn description_destination(description: &str) -> FakeDestination {
+        FakeDestination {
+            videos: RefCell::new(vec![VideoState {
+                id: "existing-video".to_owned(),
+                title: Some("Fixture Episode".to_owned()),
+                description: Some(description.to_owned()),
+                privacy_status: Some("unlisted".to_owned()),
+                published_at: None,
+            }]),
+            ..FakeDestination::default()
+        }
+    }
+
     #[test]
     fn an_upload_defaults_to_unlisted_so_a_mistake_is_never_public() {
         let episode = Episode::ready();
@@ -1182,6 +1305,64 @@ mod tests {
                 .record()
                 .contains("2026-08-07T09:00:00Z (unverified)")
         );
+    }
+
+    #[test]
+    fn description_repair_compares_the_live_value_and_records_a_confirmed_change() {
+        let episode = Episode::ready();
+        episode.mark_uploaded();
+        let destination = description_destination("Old description.");
+        let plan = plan_description_repair(&destination, &episode.path).unwrap();
+
+        assert!(plan.changed);
+        assert_eq!(plan.current, "Old description.");
+        assert_eq!(plan.proposed, "content");
+
+        let outcome = apply_description_repair(
+            &destination,
+            &plan,
+            "2026-08-07T09:00:00Z",
+            &Confirmation::without_waiting(),
+        )
+        .unwrap();
+
+        assert!(outcome.confirmed.contains(&"description".to_owned()));
+        assert_eq!(
+            destination.videos.borrow()[0].description,
+            Some(plan.proposed.clone())
+        );
+        assert!(
+            episode
+                .record()
+                .contains("- **Description Updated**: 2026-08-07T09:00:00Z")
+        );
+        assert!(episode.record().contains("Human prose that must survive."));
+    }
+
+    #[test]
+    fn unchanged_description_repair_skips_the_remote_write() {
+        let episode = Episode::ready();
+        episode.mark_uploaded();
+        let proposed =
+            std::fs::read_to_string(episode.path.join(format!("{BASE}.youtube-description.txt")))
+                .unwrap();
+        let destination = description_destination(&proposed);
+        let plan = plan_description_repair(&destination, &episode.path).unwrap();
+
+        assert!(!plan.changed);
+        let outcome = apply_description_repair(
+            &destination,
+            &plan,
+            "2026-08-07T09:00:00Z",
+            &Confirmation::without_waiting(),
+        )
+        .unwrap();
+        assert!(
+            outcome
+                .confirmed
+                .contains(&"description unchanged".to_owned())
+        );
+        assert!(!episode.record().contains("Description Updated"));
     }
 
     #[test]
@@ -1360,6 +1541,7 @@ mod tests {
         destination.videos.borrow_mut().push(VideoState {
             id: "live123".to_owned(),
             title: Some("Fixture Episode".to_owned()),
+            description: None,
             privacy_status: Some("unlisted".to_owned()),
             published_at: None,
         });

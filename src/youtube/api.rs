@@ -153,6 +153,7 @@ impl Destination for YouTubeApi {
                 VideoState {
                     id: video.id.unwrap_or_else(|| id.to_owned()),
                     title: snippet.title,
+                    description: snippet.description,
                     privacy_status: video.status.and_then(|status| status.privacy_status),
                     published_at: snippet.published_at.map(|at| at.to_rfc3339()),
                 }
@@ -243,6 +244,36 @@ impl Destination for YouTubeApi {
         self.runtime
             .block_on(self.hub.videos().update(video).add_part("status").doit())
             .with_context(|| format!("could not set {video_id} to {privacy}"))?;
+        Ok(())
+    }
+
+    fn set_description(&self, video_id: &str, description: &str) -> Result<()> {
+        let (_, list) = self
+            .runtime
+            .block_on(
+                self.hub
+                    .videos()
+                    .list(&vec!["id".into(), "snippet".into()])
+                    .add_id(video_id)
+                    .doit(),
+            )
+            .with_context(|| {
+                format!("could not read {video_id} before updating its description")
+            })?;
+        let mut video = list
+            .items
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .with_context(|| format!("no video with ID {video_id} exists on YouTube"))?;
+        let snippet = video
+            .snippet
+            .as_mut()
+            .context("YouTube returned a video without editable snippet metadata")?;
+        snippet.description = Some(description.to_owned());
+        self.runtime
+            .block_on(self.hub.videos().update(video).add_part("snippet").doit())
+            .with_context(|| format!("could not update the description for {video_id}"))?;
         Ok(())
     }
 

@@ -46,7 +46,7 @@ eps version
 
 Every command writes result data to stdout and progress, diagnostics, and errors to stderr. Text is the human default; JSON is the stable automation contract; YAML is a structured human-readable view. Bare `eps` and bare command families print useful help and exit successfully.
 
-`storage audit` is read-only. `cleanup plan` is read-only, and `cleanup apply` additionally requires `--apply` before it moves selected paths into episode-local quarantine. `eps commands`, `<command> --schema`, and `<command> --template` expose the command inventory and input contracts without loading a workspace. `eps mcp` serves the same registry over stdio; a mutating tool call must state `apply: true`, and remote or destructive commands retain their native apply gate. A separate reconcile command remains future work. Doctor provides local metadata-only prerequisite checks (R23). See the roadmap and live `eps --help` for status.
+`storage audit` is read-only. `cleanup plan` is read-only, and `cleanup apply` additionally requires `--apply` before it moves selected paths into episode-local quarantine. `eps commands`, `<command> --schema`, and `<command> --template` expose the command inventory and input contracts without loading a workspace. `eps mcp` serves the same registry over stdio; a mutating tool call must state `apply: true`, and remote or destructive commands retain their native apply gate. `eps youtube description` reads and compares the live description with the local formatted draft before a guarded update. A separate reconcile command remains future work. Doctor provides local metadata-only prerequisite checks (R23). See the roadmap and live `eps --help` for status.
 
 ## Configuration Selection
 

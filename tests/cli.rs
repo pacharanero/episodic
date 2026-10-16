@@ -2209,6 +2209,9 @@ fn command_registry_exposes_schema_template_and_safety() {
     assert!(commands.as_array().unwrap().iter().any(|command| {
         command["id"] == "cleanup/apply" && command["safety"] == "destructive_local"
     }));
+    assert!(commands.as_array().unwrap().iter().any(|command| {
+        command["id"] == "youtube/description" && command["safety"] == "remote_write"
+    }));
 
     let schema = cargo_bin_cmd!("eps")
         .args(["episode", "inspect", "--schema"])

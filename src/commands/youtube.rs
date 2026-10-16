@@ -155,6 +155,36 @@ pub fn repair(
     Ok(())
 }
 
+/// Compare the local formatted description with YouTube and optionally repair it.
+pub fn repair_description(
+    config_path: &Path,
+    episode: &Path,
+    apply: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let destination = connect(config_path)?;
+    let plan = publish::plan_description_repair(&destination, episode)?;
+    if !apply {
+        let text = format!(
+            "{}\n\nThis is a plan. Pass --apply to change YouTube.",
+            plan.as_text()
+        );
+        return output::write(format, &plan, &text);
+    }
+    let outcome = publish::apply_description_repair(
+        &destination,
+        &plan,
+        &now(),
+        &publish::Confirmation::default(),
+    )?;
+    let failed = !outcome.failed.is_empty();
+    output::write(format, &outcome, &outcome.as_text())?;
+    if failed {
+        bail!("the description repair failed");
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct PrivacyChange {
     video_id: String,
