@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Publishes `episodic-cli` to crates.io on a release tag. The first release
-# uses the environment-scoped CARGO_REGISTRY_TOKEN secret; later releases use
-# OIDC workload identity through crates.io trusted publishing.
+# uses a temporary repository-scoped CARGO_REGISTRY_TOKEN secret; later
+# releases use OIDC workload identity through crates.io trusted publishing.
 #
 # After the initial publish, configure trusted publishing for this workflow on
-# crates.io and remove CARGO_REGISTRY_TOKEN from the release environment.
+# crates.io and remove the repository CARGO_REGISTRY_TOKEN secret.
 name: Publish to crates.io
 
 on:
