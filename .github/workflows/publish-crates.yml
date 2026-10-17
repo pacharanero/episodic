@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Publishes `episodic-cli` to crates.io on a release tag. Authentication is by
-# OIDC workload identity through crates.io trusted publishing, so no
-# long-lived registry token is stored on this repository.
+# Publishes `episodic-cli` to crates.io on a release tag. The first release
+# uses the environment-scoped CARGO_REGISTRY_TOKEN secret; later releases use
+# OIDC workload identity through crates.io trusted publishing.
 #
-# Before the first release, a trusted publisher for this workflow has to be
-# configured on crates.io, and the `episodic-cli` name has to be owned there.
+# After the initial publish, configure trusted publishing for this workflow on
+# crates.io and remove CARGO_REGISTRY_TOKEN from the release environment.
 name: Publish to crates.io
 
 on:
@@ -27,6 +27,7 @@ jobs:
   publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
       id-token: write
@@ -54,11 +55,24 @@ jobs:
       - name: cargo publish (dry run)
         run: cargo publish --dry-run --locked
 
+      - name: Select crates.io authentication
+        id: auth_method
+        env:
+          INITIAL_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -n "$INITIAL_TOKEN" ]]; then
+            echo "use_oidc=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_oidc=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Authenticate with crates.io
         id: crates_io_auth
+        if: steps.auth_method.outputs.use_oidc == 'true'
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: cargo publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.crates_io_auth.outputs.token }}
         run: cargo publish --locked
