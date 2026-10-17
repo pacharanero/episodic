@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Dr Marcus Baw and Koloki Ltd
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
