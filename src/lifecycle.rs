@@ -15,10 +15,14 @@ use std::path::{Path, PathBuf};
 
 /// Stages in production order. `not-for-publishing` is a terminal branch
 /// reachable from any stage rather than a step in the sequence.
+///
+/// `in-progress` covers everything from recording through post-production
+/// (there is no separate `edited` stage): a folder moved there as soon as
+/// recording starts, before anything external (OBS, Kdenlive, Blender) has a
+/// project file open against it, and stays there until it is published.
 pub const STAGES: &[&str] = &[
     "in-planning",
     "in-progress",
-    "edited",
     "published",
     "not-for-publishing",
 ];

@@ -250,7 +250,7 @@ fn lifecycle_stage(episode_path: &Path) -> String {
         .filter(|name| {
             matches!(
                 *name,
-                "in-planning" | "in-progress" | "edited" | "published" | "not-for-publishing"
+                "in-planning" | "in-progress" | "published" | "not-for-publishing"
             )
         })
         .unwrap_or("unknown")
@@ -288,9 +288,11 @@ fn artefacts(episode_path: &Path, base: &str) -> Vec<Artefact> {
 /// An artefact that is missing is only a fault if the stage says it should be
 /// there. A planned episode has not been recorded, so it has no media; a
 /// published episode has had its media removed by retention, so demanding it
-/// back would report the retention policy working as a fault. Between those,
-/// an episode in progress is part-built by definition, and only an edited
-/// episode is claiming to be ready to upload.
+/// back would report the retention policy working as a fault. An episode
+/// in-progress spans recording through post-production and is part-built by
+/// definition throughout, so missing artefacts there are reported, never
+/// failed. `unknown` (outside any lifecycle directory) is held to the
+/// strictest standard, since nothing excuses it from being complete.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Expectation {
     /// Report nothing about artefacts.
@@ -303,7 +305,7 @@ enum Expectation {
 
 fn expectation(stage: &str) -> Expectation {
     match stage {
-        "edited" | "unknown" => Expectation::Complete,
+        "unknown" => Expectation::Complete,
         "in-progress" => Expectation::Progress,
         _ => Expectation::Ignore,
     }
