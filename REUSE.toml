@@ -31,6 +31,7 @@ path = [
     "SECURITY.md",
     "agent-instructions.md",
     "channels/**/*.md",
+    "docs/**/*.md",
     "spec/**/*.md",
     "tests/fixtures/**/*.md",
 ]

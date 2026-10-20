@@ -1,12 +1,46 @@
 # episodic
 
-**Produce and publish video and podcast episodes from local files.** A local-first command-line toolkit for planning an episode, mastering its audio, transcribing it, generating and validating its artefacts, publishing it to YouTube, and keeping the record of what was published honest.
+**Produce and publish video and podcast episodes from local files.** A local-first command-line toolkit for planning, producing, and publishing episodes to YouTube.
 
 [![CI](https://github.com/pacharanero/episodic/actions/workflows/ci.yml/badge.svg)](https://github.com/pacharanero/episodic/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/episodic-cli.svg)](https://crates.io/crates/episodic-cli)
 [![Licence: AGPL-3.0-or-later](https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
-The installed command is `eps`.
+The installed command is `eps`. It orchestrates the local tools you already use, preserves your episode records as ordinary files, and only records remote state that YouTube confirms.
+
+## Quick start
+
+Install the CLI with Cargo:
+
+```bash
+cargo install episodic-cli
+```
+
+Create a channel workspace and its smallest valid configuration:
+
+```bash
+mkdir my-channel && cd my-channel
+cat > eps.toml <<'EOF'
+schema_version = 1
+
+[channel]
+id = "my-channel"
+name = "My Channel"
+timezone = "Europe/London"
+EOF
+```
+
+Check the workspace, then create the first episode:
+
+```bash
+eps doctor
+eps channel validate
+eps episode new 2026-09-15 'First episode'
+```
+
+`eps doctor` reports which optional production tools are available without running them or reading credentials. See the [getting-started guide](docs/getting-started.md) for release-binary installation, shell completions, and the full configuration example.
+
+## See it work
 
 ```console
 $ eps episode new 2026-09-15 'EHRs and cognitive load' --guest 'Dr Example'
@@ -54,7 +88,7 @@ Video ID: dQw4w9WgXcQ
   recorded: Captions
 ```
 
-## Install
+## Installation
 
 ```bash
 cargo install episodic-cli             # from crates.io; installs `eps`
@@ -78,31 +112,6 @@ An `.msi` is attached to each release, and prebuilt binaries are published for m
 `eps` orchestrates tools you already have rather than reimplementing them, so install what you intend to use: **FFmpeg** for audio and frames, **Whisper** for transcription, **ImageMagick** for thumbnails, and a **language-model CLI** for generated metadata. Run `eps doctor` to see what is present and what is missing.
 
 Install shell completions with `eps completions install`. It detects the current shell, or use `eps completions install --shell zsh`. It writes only the completion file and prints any setup still needed; it never edits shell startup files. Use `eps completions bash|zsh|fish|powershell|elvish` to print a script for a custom setup or package manager.
-
-## Quick start
-
-A channel is a directory with an `eps.toml` in it. The smallest useful one:
-
-```toml
-[channel]
-id = "my-channel"
-name = "My Channel"
-timezone = "Europe/London"
-
-[paths]
-episodes = "episodes"
-```
-
-Then, from that directory:
-
-```bash
-eps doctor                              # what is installed, what is missing
-eps channel validate                    # is the configuration sound
-eps episode new 2026-09-15 'First episode'
-eps episode list
-```
-
-Every command takes `--format json` for scripting, and `--dry-run` to see exactly what would happen without doing it. `eps mcp` exposes the same commands to an MCP client over standard input/output; start it from a channel workspace or pass `--config /path/to/eps.toml` before `mcp`. MCP mutations require an explicit `apply: true` input field, including local writes, and remote or destructive commands retain their normal apply safeguards.
 
 ## What it is
 
@@ -167,6 +176,16 @@ The things that stop a tool like this from ruining an afternoon:
 Configuration is selected by explicit `--config <path>` first, otherwise `eps.toml` in the current directory, and nothing else - no ancestor search, no environment variable, no global fallback. This is deliberately narrower than most tools: with several channels on one machine, the failure mode worth preventing is silently operating on the wrong one.
 
 Generated metadata may use `provider = "cli"`, or Anthropic's native Messages API with `provider = "anthropic"` and `api_key_env = "ANTHROPIC_API_KEY"`. The latter names an environment variable containing the key. `eps` resolves it only while generating metadata and `eps doctor` never reads it.
+
+## Documentation
+
+- [Getting started](docs/getting-started.md) covers installation, workspace setup, and the first episode.
+- [First episode](docs/first-episode.md) walks through the local production workflow and guarded upload.
+- [YouTube setup](docs/youtube-setup.md) explains the existing authorised-user credential requirement and safe upload flow.
+- [Troubleshooting](docs/troubleshooting.md) explains how to use `eps doctor` and where to look when a workflow cannot proceed.
+- [Channel configuration reference](channels/README.md) and the complete [example configuration](channels/example.toml) document every supported setting.
+
+Every command takes `--format json` for scripting, and `--dry-run` to see exactly what would happen without doing it. `eps mcp` exposes the same commands to an MCP client over standard input/output; start it from a channel workspace or pass `--config /path/to/eps.toml` before `mcp`. MCP mutations require an explicit `apply: true` input field, including local writes, and remote or destructive commands retain their normal apply safeguards.
 
 ## Diagnostics
 

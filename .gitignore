@@ -5,3 +5,6 @@
 *.swp
 *.tmp
 .DS_Store
+
+# Local-only private workspace
+/.private
