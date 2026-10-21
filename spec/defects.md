@@ -213,6 +213,21 @@ Reproduction: run `eps storage audit --stage <any>` against a workspace containi
 
 ---
 
+## F8 - `youtube description` fails with an `etag` API error on every call
+
+Found on 2026-10-21 running `eps youtube description <episode> --apply` against a real unlisted upload with `eps` built from `79e20e4`.
+
+```
+$ eps youtube description episodes/in-progress/2026.10.19-oli-evans-on-ods-fast-local-first-nhs-organisation-data --apply
+Error: could not update the description for 8kazJK02ezk: Bad Request: {"error":{"code":400,"errors":[{"domain":"youtube.part","location":"part","locationType":"parameter","message":"'etag'","reason":"unknownPart"}],"message":"'etag'"}}
+```
+
+YouTube's API is rejecting the `videos.update` call because the `part` parameter list being sent includes `etag` as if it were a resource part name, rather than using the video resource's `etag` field for conditional-update semantics (If-Match) or omitting it. This looks like a `google-youtube3` request-building bug rather than anything wrong with the local description file. Not yet investigated further since `eps youtube upload` sets the description correctly at upload time, so this only blocks the narrower "patch the description of an already-uploaded video without re-uploading" path.
+
+Reproduction: run `eps youtube description <episode-dir> --apply` against any already-uploaded video.
+
+---
+
 ## Not defects
 
 Recorded so they are not re-reported.
