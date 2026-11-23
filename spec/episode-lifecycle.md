@@ -3,11 +3,12 @@
 ## Stages
 
 ```text
-in-planning -> in-progress -> edited -> published
-                                  \-> not-for-publishing
+in-planning -> in-progress -> published
+
+not-for-publishing  (reachable from any stage)
 ```
 
-An episode folder belongs to exactly one lifecycle directory. Its basename is `YYYY.MM.DD-slug`, and its canonical state file uses the same base. Folder location expresses lifecycle stage; duplicating one episode across stage directories is invalid state.
+There is no separate `edited` stage: `in-progress` covers recording, editing and post-production, as `STAGES` in `src/lifecycle.rs` defines. An episode folder belongs to exactly one lifecycle directory. Its basename is `YYYY.MM.DD-slug`, and its canonical state file uses the same base. Folder location expresses lifecycle stage; duplicating one episode across stage directories is invalid state.
 
 ## Pre-Production
 

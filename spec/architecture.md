@@ -40,6 +40,7 @@ eps commands
 eps <command> --schema|--template
 eps doctor
 eps mcp
+eps gui
 eps completions
 eps version
 ```
@@ -89,4 +90,4 @@ Adapters must expose the command and version used, redact secrets, and return us
 
 ## Future Surfaces
 
-`eps mcp` consumes the same command registry, plans, schemas, and safety gates as the CLI. It launches the current executable with JSON output for each tool call, keeping protocol frames isolated while preserving the CLI parser and typed registry route. It may not bypass `--apply` semantics or write episode files directly behind the engine's back. Separate filesystem/frontmatter visualization tools may read lifecycle state without becoming part of the engine.
+`eps mcp` consumes the same command registry, plans, schemas, and safety gates as the CLI. It launches the current executable with JSON output for each tool call, keeping protocol frames isolated while preserving the CLI parser and typed registry route. It may not bypass `--apply` semantics or write episode files directly behind the engine's back. Separate filesystem/frontmatter visualization tools may read lifecycle state without becoming part of the engine. `eps gui` (specified in [gui.md](gui.md), not yet implemented) is a local web surface over the same registry handlers, under the same rules as `eps mcp`.

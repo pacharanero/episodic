@@ -228,6 +228,22 @@ Reproduction: run `eps youtube description <episode-dir> --apply` against any al
 
 ---
 
+## F9 - The silence check behind the F3 clamp measures from the start of the file
+
+- [ ] **Open.** Found 2026-11-17 on a real EDH episode; root cause reproduced on 2026-11-19 with a synthetic file.
+
+`span_peak_dbfs` in `src/media.rs` passes `-ss` and `-to` after `-i`, which makes them output options. With output-side seeking, ffmpeg still decodes and filters the input from 0:00 and only discards frames afterwards, so `volumedetect` reports the peak of everything from the start of the file up to `-to`, not the peak of the span. Any speech before a suspected run of hallucinated cues therefore makes the span look audible, and the F3 clamp keeps the cues. In normal episodes speech always comes first, so the silence-confirmed removal path can effectively never succeed.
+
+Production evidence: a 56:01 render whose audio was digital silence from 5:41 to the end (`silencedetect` at -60 dB found one unbroken span from 341.1 s to 3361.0 s; spot checks measured -91 dB mean). Whisper produced 100 cues of `Thank you.` from 6:29 to the end, and `transcript transcribe` reported `kept 100 repeated cue(s) from 6:29: the audio under them is not silent (-1.3 dBFS peak)`. That -1.3 dBFS peak belongs to the speech before 5:41.
+
+Synthetic reproduction: 10 s of 440 Hz tone followed by 10 s of silence. `ffmpeg -i t.wav -ss 12 -to 20 -af volumedetect -f null -` reports `max_volume: -18.1 dB`; `ffmpeg -ss 12 -to 20 -i t.wav -af volumedetect -f null -` reports `max_volume: -91.0 dB`.
+
+Suggested fix: move `-ss` and `-to` before `-i` (input seeking), or trim inside the filter graph with `atrim=start=..:end=..` ahead of `volumedetect`. Add a test against a real generated file with audible audio before a silent span, because the existing F3 tests did not exercise ffmpeg's seek semantics.
+
+Related, not part of this defect: the render itself was silent because the editor project's media links pointed at a folder that had been moved to another lifecycle stage. That is an editing-tool problem rather than an `eps` fault, but a silence check on the edited master before transcription would have saved a wasted GPU run (see R37).
+
+---
+
 ## Not defects
 
 Recorded so they are not re-reported.

@@ -96,3 +96,17 @@ Consequences: a future incompatible schema needs an explicit migration command a
 ## D12 - Anthropic is the first native metadata provider
 
 Decided 2026-10-11. `provider = "anthropic"` calls the Messages API directly. Its `api_key_env` names an environment variable containing the API key; the value is resolved only when metadata is generated and is neither persisted nor inspected by `eps doctor`. Existing OpenAI and Ollama Cloud subscription workflows continue through `provider = "cli"` until their API and credential contracts are selected.
+
+## D13 - The GUI is a local web surface served by `eps`
+
+Decided 2026-11-19 by Marcus. `eps gui` serves a React, TypeScript, Mantine and Vite frontend on the loopback interface, used in the normal browser. This is a deliberate exception to the house-style Tauri default for desktop GUIs: the work the GUI supports is full of external links (recording tools, calendar templates, platform composers, YouTube Studio) that a browser tab handles natively, and the problem that prompted the GUI was links breaking outside a browser. The frontend still follows the house-style frontend stack and UI standard, so a Tauri wrapper remains possible later without a rewrite.
+
+Consequences: the server must defend a loopback port against other local processes and web pages (per-launch token, `Host` and `Origin` checks, no CORS), and the built frontend has to ship inside the `eps` binary (G1 in [gui.md](gui.md)). See [gui.md](gui.md).
+
+## D14 - Model routing is visible, with per-run overrides
+
+Decided 2026-11-19 by Marcus. Every surface shows which task, profile, provider and model a generation step will use before it runs. A step may be run once with a different configured profile; the channel default stays an `eps.toml` edit. The override is a `--profile` option on the `metadata` commands (R36), so the CLI, MCP and GUI surfaces share one mechanism, and it is recorded in the job log rather than in configuration.
+
+## D15 - One workspace per GUI server
+
+Decided 2026-11-19 by Marcus. `eps gui` selects one workspace exactly as D9 requires. A second channel runs a second server. No multi-workspace registry is introduced for the GUI.
