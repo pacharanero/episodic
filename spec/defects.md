@@ -244,6 +244,16 @@ Related, not part of this defect: the render itself was silent because the edito
 
 ---
 
+## F10 - Back-catalogue episodes filed under a year were inspected as stage `unknown`
+
+- [x] **Fixed.** Found 2026-11-23 while checking GUI milestones against the real EDH workspace.
+
+`episode list` finds published episodes filed one level deeper under a year directory (`published/2024/<base>`), but `episode inspect` took the stage from the folder's immediate parent only. All 31 year-filed EDH episodes were therefore reported as stage `unknown`, held to the strictest artefact expectation, and shown as "recorded as public, but the folder is in unknown". Promotion refused them because `unknown` has no stage to promote from; had the stage been recognised, its destination arithmetic (the folder's grandparent) would have produced `published/in-progress/<base>`.
+
+Fixed at the shared boundary: `episode::stage_directory` finds the stage directory with or without a year level, and both inspection and promotion use it. A promoted year-filed episode lands directly in the destination stage; the year level is not kept. Covered by `back_catalogue_episodes_under_a_year_keep_their_stage`.
+
+---
+
 ## Not defects
 
 Recorded so they are not re-reported.

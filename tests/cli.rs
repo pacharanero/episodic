@@ -769,6 +769,54 @@ fn listing_groups_episodes_by_stage_and_finds_year_subdirectories() {
 }
 
 #[test]
+fn back_catalogue_episodes_under_a_year_keep_their_stage() {
+    let workspace = Workspace::new();
+    workspace
+        .eps(&["episode", "new", "2024-03-01", "Archived conversation"])
+        .unwrap();
+    let base = "2024.03.01-archived-conversation";
+    let filed = workspace.root.join("episodes/published/2024").join(base);
+    fs::create_dir_all(filed.parent().unwrap()).unwrap();
+    fs::rename(
+        workspace.root.join("episodes/in-planning").join(base),
+        &filed,
+    )
+    .unwrap();
+
+    let output = workspace
+        .eps(&[
+            "--format",
+            "json",
+            "episode",
+            "inspect",
+            filed.to_str().unwrap(),
+        ])
+        .unwrap();
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["stage"], "published");
+
+    // Promotion moves it into the destination stage itself, never into a
+    // stage directory nested inside its old one.
+    workspace
+        .eps(&[
+            "episode",
+            "promote",
+            filed.to_str().unwrap(),
+            "not-for-publishing",
+            "--force",
+        ])
+        .unwrap();
+    assert!(
+        workspace
+            .root
+            .join("episodes/not-for-publishing")
+            .join(base)
+            .is_dir()
+    );
+    assert!(!filed.exists());
+}
+
+#[test]
 fn promotion_is_guarded_and_reversible_only_with_force() {
     let workspace = Workspace::new();
     workspace

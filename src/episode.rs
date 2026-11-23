@@ -299,18 +299,31 @@ fn value(fields: &BTreeMap<String, String>, label: &str) -> Option<String> {
 }
 
 fn lifecycle_stage(episode_path: &Path) -> String {
-    episode_path
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-        .filter(|name| {
-            matches!(
-                *name,
-                "in-planning" | "in-progress" | "published" | "not-for-publishing"
-            )
-        })
-        .unwrap_or("unknown")
-        .to_owned()
+    stage_directory(episode_path).map_or_else(|| "unknown".to_owned(), |(stage, _)| stage)
+}
+
+/// The lifecycle stage holding an episode folder, and that stage's directory.
+///
+/// Back-catalogue episodes are filed one level deeper, under a year
+/// directory (`published/2024/<base>`), exactly as `episode list` finds them.
+pub fn stage_directory(episode_path: &Path) -> Option<(String, PathBuf)> {
+    let parent = episode_path.parent()?;
+    let is_year = |path: &Path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.len() == 4 && name.bytes().all(|byte| byte.is_ascii_digit()))
+    };
+    let directory = if is_year(parent) {
+        parent.parent()?
+    } else {
+        parent
+    };
+    let stage = directory.file_name()?.to_str()?;
+    matches!(
+        stage,
+        "in-planning" | "in-progress" | "published" | "not-for-publishing"
+    )
+    .then(|| (stage.to_owned(), directory.to_path_buf()))
 }
 
 fn artefacts(episode_path: &Path, base: &str) -> Vec<Artefact> {

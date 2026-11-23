@@ -220,10 +220,12 @@ pub fn plan_promotion(input: &Path, to_stage: &str, force: bool) -> Result<Promo
         );
     }
 
-    let destination = report
-        .episode_path
-        .parent()
-        .context("episode folder has no parent")?
+    // Measured from the stage directory, not the folder's grandparent, so a
+    // back-catalogue episode under a year directory lands in the stage itself
+    // rather than inside its old stage. The year subdirectory is not kept.
+    let (_, stage_directory) =
+        episode::stage_directory(&report.episode_path).context("episode has no stage directory")?;
+    let destination = stage_directory
         .parent()
         .context("lifecycle directory has no parent")?
         .join(to_stage);
