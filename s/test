@@ -8,4 +8,5 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+npm --prefix "$root/gui" run check
 exec cargo test "$@"

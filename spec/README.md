@@ -12,7 +12,7 @@ This directory defines the channel-neutral behaviour of `episodic`. Channel iden
 6. [documentation-map.md](documentation-map.md) - classification of the source workspace documentation.
 7. [roadmap.md](roadmap.md) - implementation milestones and status.
 8. [defects.md](defects.md) - faults found in real use, with reproduction steps.
-9. [gui.md](gui.md) - the local web workbench served by `eps gui` (draft, R32).
+9. [gui.md](gui.md) - the local web workbench served by `eps gui` (R32, initial read-only increment).
 
 Resolved decisions live in [decisions.md](decisions.md). Historical query codes originated in the external EDH workspace; this standalone repository does not require a parent decision register. Current gaps and deferred work live in [roadmap.md](roadmap.md), and faults in behaviour that is already implemented live in [defects.md](defects.md).
 

@@ -18,6 +18,13 @@ path = [
     "src/**",
     "tests/**/*.rs",
     "wix/**",
+    "gui/src/**",
+    "gui/package.json",
+    "gui/package-lock.json",
+    "gui/tsconfig.json",
+    "gui/vite.config.ts",
+    "gui/index.html",
+    "gui/e2e/*.py",
 ]
 SPDX-FileCopyrightText = "2026 Dr Marcus Baw and Koloki Ltd"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
@@ -32,6 +39,7 @@ path = [
     "agent-instructions.md",
     "channels/**/*.md",
     "docs/**/*.md",
+    "gui/**/*.md",
     "spec/**/*.md",
     "tests/fixtures/**/*.md",
 ]

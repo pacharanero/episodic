@@ -9,4 +9,5 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 cargo fmt --all --check
+npm --prefix "$root/gui" run check
 exec cargo clippy --all-targets --all-features "$@" -- -D warnings

@@ -2,7 +2,7 @@
 
 `eps gui` serves a local web workbench for one channel workspace. It shows every episode's stage and progress as the filesystem records it, gathers the links and tools each step needs in one consistent place, shows which models each generation step will use, and runs `eps` commands through the same registry handlers as the CLI and MCP surfaces. It adds no workflow logic of its own.
 
-Status: draft for agreement (R32). Nothing here is implemented yet.
+Status: design accepted for implementation on 2026-11-23. R33 has an initial read-only increment: loopback server, lifecycle board, episode inspection, recorded-video links and model routing. It uses the existing lifecycle and inspection engine functions directly. Automatic change notifications, artefact previews, further links and packaged assets remain outstanding; no mutations are enabled.
 
 ## Why
 
@@ -157,6 +157,10 @@ React, TypeScript, Mantine and Vite in `gui/`, following the house-style fronten
 | R35 | Remote steps: plan-then-apply screens with plan digests for upload, captions, thumbnail, playlists, description and publish; on-demand `youtube verify`. | An unlisted upload and its verification can be done from the GUI with the same guarantees as the CLI. |
 
 ## Open Questions
+
+During R33 development, `eps gui --assets <built-directory>` explicitly selects a locally built frontend. Assets are not committed and Node is not invoked by Cargo. This development-only step does not settle G1: the milestone remains incomplete until release packaging embeds the assets. The server serves only HTML, JavaScript and CSS under the selected assets directory; it is not a workspace file server.
+
+Dependency admission (2026-11-23): Axum 0.8.9 (MIT, maintained Tokio project) provides HTTP parsing, routing and responses; UUID 1.28.0 (MIT/Apache-2.0, already resolved) supplies OS-random per-launch tokens. Neither owns domain state and both can be replaced at the server boundary. The frontend uses the specified React 19.3.1, Mantine 9.8.2, Vite 8.3.8, TypeScript 7.0.2 and Lucide React 1.78.0, checked against their npm registry metadata; runtime packages are MIT/ISC and TypeScript is Apache-2.0. Direct dependencies and application lockfiles are committed; npm auditing and a frontend build run in CI. There are no CDN imports, telemetry libraries or remote fonts. Third-party sources and licences remain in dependency packages, not copied into the repository.
 
 - **G1 - Shipping the frontend.** The built assets must reach crates.io and the release installers. Options: commit nothing built and have the release workflow build `gui/` and package `gui/dist` through Cargo's `include`; or build in `build.rs`, which would make `cargo install` depend on Node. The first is preferred.
 - **G2 - Where job logs live.** In the workspace (for example a gitignored cache directory) so they sync with it, or in the user's state directory so they do not. Episode folders are not the place, because the artefact contract does not name them.

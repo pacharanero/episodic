@@ -179,6 +179,8 @@ Generated metadata may use `provider = "cli"`, or Anthropic's native Messages AP
 
 ## Documentation
 
+The [browser workbench preview](docs/gui.md) shows the lifecycle board, episode inspection and model routing locally. This development increment is read-only; moving episodes and publishing from the browser are still roadmap work.
+
 - [Getting started](docs/getting-started.md) covers installation, workspace setup, and the first episode.
 - [First episode](docs/first-episode.md) walks through the local production workflow and guarded upload.
 - [YouTube setup](docs/youtube-setup.md) explains the existing authorised-user credential requirement and safe upload flow.

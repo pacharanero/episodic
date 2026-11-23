@@ -9,6 +9,7 @@ pub mod command_registry;
 pub mod commands;
 pub mod document;
 pub mod episode;
+pub mod gui;
 pub mod lifecycle;
 pub mod llm;
 pub mod mcp;

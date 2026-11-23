@@ -32,6 +32,8 @@ This file is the entry point for AI coding agents. Read it before changing anyth
 - `s/test` - run all tests.
 - `s/lint` - run formatting checks and strict Clippy.
 - `s/build` - create a release build.
+- `npm --prefix gui ci --ignore-scripts` - install locked frontend dependencies before `s/test` or `s/lint`.
+- `s/gui-dev --config /path/to/eps.toml` - build and serve the read-only browser preview. See `docs/gui.md` and `gui/e2e/README.md` for frontend and browser checks.
 
 ## Before Every Commit
 

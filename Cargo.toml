@@ -85,6 +85,7 @@ lto = "thin"
 
 [dependencies]
 anyhow = "1.0.104"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 clap = { version = "4.6.4", features = ["derive", "env"] }
 clap_complete = "4.6.8"
 google-youtube3 = { version = "7.0.0", features = ["yup-oauth2"] }
@@ -99,6 +100,7 @@ serde_yaml_ng = "0.10.0"
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "fs", "io-std", "io-util", "process", "sync"] }
 toml = "1.1.4"
+uuid = { version = "1.28.0", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"

@@ -321,6 +321,7 @@ pub(crate) fn run_episode(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
+        EpisodeCommand::Links { path } => commands::episode::links(&path, format),
         EpisodeCommand::Inspect { path } => commands::episode::inspect(&path, format),
         EpisodeCommand::Validate { path } => commands::episode::validate(&path, format),
         EpisodeCommand::Set(args) => commands::episode::set(
@@ -499,7 +500,7 @@ fn command_path_without_global_options(args: &[OsString]) -> Option<Vec<String>>
 
 fn collect(command: &Command, parent: &[String], definitions: &mut Vec<CommandDefinition>) {
     for child in command.get_subcommands() {
-        if child.get_name() == "mcp" {
+        if matches!(child.get_name(), "mcp" | "gui") {
             continue;
         }
         let mut path = parent.to_vec();

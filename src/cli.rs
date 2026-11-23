@@ -63,6 +63,15 @@ enum RootCommand {
     Doctor,
     /// Serve the command registry over the Model Context Protocol on standard I/O.
     Mcp,
+    /// Serve a read-only channel workbench in the browser on loopback.
+    Gui {
+        /// Built frontend directory (run npm run build in gui/ first).
+        #[arg(long, value_parser = tilde_pathbuf, value_hint = ValueHint::DirPath)]
+        assets: PathBuf,
+        /// Loopback port; zero selects an available port.
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+    },
     /// Inspect and validate episode state.
     Episode {
         #[command(subcommand)]
@@ -382,6 +391,12 @@ pub(crate) enum ChannelCommand {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum EpisodeCommand {
+    /// Show YouTube links derived from the locally recorded video ID; contacts nothing.
+    Links {
+        /// Episode directory or canonical metadata file.
+        #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
+        path: PathBuf,
+    },
     /// Inspect local episode state without changing it.
     Inspect {
         /// Episode directory or canonical metadata file.
@@ -568,6 +583,9 @@ pub fn run() -> Result<()> {
             command_registry::run_doctor(cli.config.as_deref(), cli.format)
         }
         Some(RootCommand::Mcp) => crate::mcp::run(cli.config, cli.dry_run),
+        Some(RootCommand::Gui { assets, port }) => {
+            crate::gui::run(cli.config, assets, port, cli.dry_run)
+        }
         Some(RootCommand::Completions { command: None }) => print_family_help("completions"),
         Some(RootCommand::Completions {
             command: Some(command),

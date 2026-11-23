@@ -58,6 +58,62 @@ pub struct Finding {
     pub message: String,
 }
 
+/// Browser-safe links derived from a recorded video ID, never a guessed remote state.
+#[derive(Debug, Serialize)]
+pub struct EpisodeLink {
+    pub label: &'static str,
+    pub url: String,
+}
+
+pub fn links(fields: &EpisodeFields) -> Vec<EpisodeLink> {
+    let Some(id) = fields.video_id.as_deref().filter(|id| {
+        id.len() == 11
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    }) else {
+        return Vec::new();
+    };
+    vec![
+        EpisodeLink {
+            label: "Watch on YouTube",
+            url: format!("https://www.youtube.com/watch?v={id}"),
+        },
+        EpisodeLink {
+            label: "YouTube Studio",
+            url: format!("https://studio.youtube.com/video/{id}/edit"),
+        },
+    ]
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    #[test]
+    fn links_use_only_a_valid_recorded_video_id() {
+        let mut fields = EpisodeFields::default();
+        for id in [
+            None,
+            Some("[To be added]"),
+            Some("javascript:alert(1)"),
+            Some("../secrets"),
+        ] {
+            fields.video_id = id.map(str::to_owned);
+            assert!(links(&fields).is_empty());
+        }
+        fields.video_id = Some("dQw4w9WgXcQ".into());
+        assert_eq!(
+            links(&fields)[0].url,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+        assert_eq!(
+            links(&fields)[1].url,
+            "https://studio.youtube.com/video/dQw4w9WgXcQ/edit"
+        );
+    }
+}
+
 impl EpisodeReport {
     pub fn is_valid(&self) -> bool {
         !self

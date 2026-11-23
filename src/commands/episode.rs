@@ -16,6 +16,21 @@ pub fn inspect(path: &Path, format: OutputFormat) -> Result<()> {
     output::write(format, &report, &report.as_text())
 }
 
+pub fn links(path: &Path, format: OutputFormat) -> Result<()> {
+    let report = episode::inspect(path)?;
+    let links = episode::links(&report.fields);
+    let text = if links.is_empty() {
+        "No YouTube links: no valid recorded Video ID.".to_owned()
+    } else {
+        links
+            .iter()
+            .map(|link| format!("{}: {}", link.label, link.url))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    output::write(format, &links, &text)
+}
+
 pub fn validate(path: &Path, format: OutputFormat) -> Result<()> {
     let report = episode::inspect(path)?;
     let valid = report.is_valid();
