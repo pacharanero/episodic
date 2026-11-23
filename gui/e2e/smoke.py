@@ -49,11 +49,50 @@ with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(url)
             page.get_by_role("heading", name="Synthetic production channel").wait_for()
+
+            def assert_colour_contrast():
+                failures = page.evaluate("""() => {
+                    const rgb = value => value.match(/[\\d.]+/g).slice(0, 3).map(Number);
+                    const luminance = values => values.map(v => {
+                        v /= 255;
+                        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+                    }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+                    const failures = [];
+                    for (const node of document.querySelectorAll('.stage h3, .status, .muted, .brand, footer, input')) {
+                        const style = getComputedStyle(node);
+                        let background = style.backgroundColor;
+                        let parent = node.parentElement;
+                        while (background === 'rgba(0, 0, 0, 0)' && parent) {
+                            background = getComputedStyle(parent).backgroundColor;
+                            parent = parent.parentElement;
+                        }
+                        const colours = [style.color];
+                        if (node.matches('input')) colours.push(getComputedStyle(node, '::placeholder').color);
+                        for (const colour of colours) {
+                            const a = luminance(rgb(colour)), b = luminance(rgb(background));
+                            const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+                            if (ratio < 4.5) failures.push(`${node.textContent || 'input'}: ${ratio.toFixed(2)}`);
+                        }
+                    }
+                    return failures;
+                }""")
+                assert not failures, f"Text contrast below 4.5:1: {failures}"
+
+            assert_colour_contrast()
             for width, height, name in [(1440, 900, "desktop"), (768, 1024, "tablet"), (390, 844, "phone"), (720, 450, "reflow")]:
                 page.set_viewport_size({"width": width, "height": height})
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"overflow at {name}"
                 page.screenshot(path=str(CAPTURES / f"{name}.png"), full_page=True)
             page.set_viewport_size({"width": 1440, "height": 900})
+            page.locator("button.episode").first.hover()
+            assert_colour_contrast()
+            page.screenshot(path=str(CAPTURES / "hover.png"), full_page=True)
+            page.mouse.move(0, 0)
+            cdp = context.new_cdp_session(page)
+            for deficiency in ["deuteranopia", "protanopia", "tritanopia", "achromatopsia"]:
+                cdp.send("Emulation.setEmulatedVisionDeficiency", {"type": deficiency})
+                page.screenshot(path=str(CAPTURES / f"{deficiency}.png"), full_page=True)
+            cdp.send("Emulation.setEmulatedVisionDeficiency", {"type": "none"})
             page.keyboard.press("Tab")
             assert page.get_by_role("link", name="Skip to episodes").evaluate("node => node === document.activeElement")
             page.keyboard.press("Enter")
@@ -65,6 +104,7 @@ with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
             assert page.locator("button.episode").count() == 1
             page.locator("button.episode").click()
             page.get_by_role("heading", name="Artefacts", exact=True).wait_for()
+            assert_colour_contrast()
             assert page.get_by_role("link", name="Watch on YouTube").get_attribute("href") == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
             page.screenshot(path=str(CAPTURES / "episode.png"), full_page=True)
             page.get_by_role("button", name="Episodes", exact=True).click()

@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T00:00:00Z",
+  "title": "Design System: episodic",
+  "extensions": {
+    "colorMeta": {
+      "workbench-teal": { "role": "primary", "displayName": "Workbench teal", "tonalRamp": ["oklch(15% 0.02 175)", "oklch(27% 0.04 175)", "oklch(39% 0.06 175)", "oklch(51% 0.08 175)", "oklch(63% 0.09 175)", "oklch(75% 0.07 175)", "oklch(87% 0.04 175)", "oklch(95% 0.01 175)"] },
+      "control-teal": { "role": "primary", "displayName": "Control teal", "tonalRamp": ["#087f5b", "#099268", "#0ca678", "#12b886", "#20c997", "#63e6be", "#96f2d7", "#e6fcf5"] },
+      "surface": { "role": "neutral", "displayName": "Surface", "tonalRamp": ["oklch(15% 0 0)", "oklch(27% 0 0)", "oklch(39% 0 0)", "oklch(51% 0 0)", "oklch(63% 0 0)", "oklch(75% 0 0)", "oklch(87% 0 0)", "oklch(95% 0 0)"] },
+      "canvas": { "role": "neutral", "displayName": "Canvas", "tonalRamp": ["oklch(15% .001 195)", "oklch(27% .002 195)", "oklch(39% .003 195)", "oklch(51% .003 195)", "oklch(63% .003 195)", "oklch(75% .003 195)", "oklch(87% .002 195)", "oklch(95% .001 195)"] },
+      "text": { "role": "neutral", "displayName": "Text", "tonalRamp": ["oklch(15% 0 0)", "oklch(27% 0 0)", "oklch(39% 0 0)", "oklch(51% 0 0)", "oklch(63% 0 0)", "oklch(75% 0 0)", "oklch(87% 0 0)", "oklch(95% 0 0)"] },
+      "root-text": { "role": "neutral", "displayName": "Root text (body override applies)", "tonalRamp": ["oklch(15% .01 245)", "oklch(27% .02 245)", "oklch(39% .025 245)", "oklch(51% .025 245)", "oklch(63% .025 245)", "oklch(75% .02 245)", "oklch(87% .01 245)", "oklch(95% .003 245)"] },
+      "muted-text": { "role": "neutral", "displayName": "Muted text", "tonalRamp": ["oklch(15% .01 235)", "oklch(27% .02 235)", "oklch(39% .025 235)", "oklch(51% .025 235)", "oklch(63% .025 235)", "oklch(75% .02 235)", "oklch(87% .01 235)", "oklch(95% .003 235)"] },
+      "border": { "role": "neutral", "displayName": "Border", "tonalRamp": ["oklch(15% .004 220)", "oklch(27% .008 220)", "oklch(39% .01 220)", "oklch(51% .01 220)", "oklch(63% .01 220)", "oklch(75% .008 220)", "oklch(87% .005 220)", "oklch(95% .002 220)"] },
+      "divider": { "role": "neutral", "displayName": "Divider", "tonalRamp": ["oklch(15% .003 195)", "oklch(27% .005 195)", "oklch(39% .006 195)", "oklch(51% .006 195)", "oklch(63% .006 195)", "oklch(75% .005 195)", "oklch(87% .003 195)", "oklch(95% .001 195)"] },
+      "control-border": { "role": "neutral", "displayName": "Control border", "tonalRamp": ["#343a40", "#495057", "#868e96", "#adb5bd", "#ced4da", "#dee2e6", "#e9ecef", "#f8f9fa"] },
+      "control-hover": { "role": "neutral", "displayName": "Control hover", "tonalRamp": ["#343a40", "#495057", "#868e96", "#adb5bd", "#ced4da", "#dee2e6", "#e9ecef", "#f8f9fa"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Episodes and inspection headings." },
+      "title": { "displayName": "Title", "purpose": "Channel heading, semantically h1 with h3 visual size." },
+      "body": { "displayName": "Body", "purpose": "Records and episode content." },
+      "label": { "displayName": "Label", "purpose": "Search label and small control text." },
+      "path": { "displayName": "Path", "purpose": "Wrapping filesystem paths." }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      { "name": "board-two-columns-max", "value": "1000px" },
+      { "name": "board-one-column-max", "value": "560px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Default button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Bordered workspace actions and external links; native Mantine defaults remain authoritative.",
+      "html": "<button class=\"ds-button\">Refresh</button>",
+      "css": ".ds-button{height:36px;padding:0 18px;border:1px solid #ced4da;border-radius:4px;background:#fff;color:#000;font:600 14px system-ui,sans-serif;cursor:pointer}.ds-button:hover{background:#f8f9fa}.ds-button:focus-visible{outline:3px solid #09695d;outline-offset:3px}.ds-button:active{transform:translateY(1px)}.ds-button:disabled{background:#f1f3f5;color:#adb5bd;cursor:not-allowed}"
+    },
+    {
+      "name": "Subtle return button",
+      "kind": "button",
+      "refersTo": "button-subtle",
+      "description": "Return from inspection to Episodes.",
+      "html": "<button class=\"ds-return\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m12 19-7-7 7-7M5 12h14\"/></svg>Episodes</button>",
+      "css": ".ds-return{display:inline-flex;align-items:center;gap:10px;height:36px;padding:0 18px;border:1px solid transparent;border-radius:4px;background:transparent;color:#087f5b;font:600 14px system-ui,sans-serif;cursor:pointer}.ds-return:hover{background:rgba(18,184,134,.12)}.ds-return:focus-visible{outline:3px solid #09695d;outline-offset:3px}.ds-return:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Episode search",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Visible label and search icon; simplified standalone rendering of Mantine TextInput.",
+      "html": "<label class=\"ds-label\">Find an episode<span class=\"ds-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input placeholder=\"Title, guest or date\" /></span></label>",
+      "css": ".ds-label{display:block;color:#000;font:500 14px/1.55 system-ui,sans-serif}.ds-search{position:relative;display:block}.ds-search svg{position:absolute;left:10px;top:10px;color:#868e96;pointer-events:none}.ds-search input{width:230px;height:36px;padding:0 12px 0 36px;border:1px solid #ced4da;border-radius:4px;color:#000;background:#fff;font:14px system-ui,sans-serif}.ds-search input::placeholder{color:#adb5bd}.ds-search input:focus{border-color:#087f5b}.ds-search input:focus-visible{outline:3px solid #09695d;outline-offset:3px}"
+    },
+    {
+      "name": "Episode card",
+      "kind": "card",
+      "refersTo": "episode-card",
+      "description": "Native button with production evidence and next action.",
+      "html": "<button class=\"ds-episode\"><span class=\"ds-muted\">2026-11-22</span><strong>Synthetic planning conversation</strong><span>Example guest</span><span class=\"ds-next\">Record the episode</span><span class=\"ds-muted\">2/9 artefacts present</span></button>",
+      "css": ".ds-episode{width:100%;text-align:left;border:1px solid var(--border,#cbd2d5);background:#fff;border-radius:4px;padding:16px;margin-bottom:12px;cursor:pointer;color:#000;font:16px/1.55 system-ui,sans-serif}.ds-episode>span,.ds-episode>strong{display:block;overflow-wrap:anywhere}.ds-episode strong{margin:6px 0}.ds-episode:hover{border-color:#09695d}.ds-episode:focus-visible{outline:3px solid #09695d;outline-offset:3px}.ds-muted{color:var(--muted,#52616b);font-size:14px}.ds-next{border-top:1px solid #e0e5e5;margin-top:12px;padding-top:10px;font-size:14px}"
+    },
+    {
+      "name": "Read-only badge",
+      "kind": "chip",
+      "description": "Informational Mantine outline badge, not an interactive chip.",
+      "html": "<span class=\"ds-badge\">Read-only preview</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;height:20px;padding:0 10px;border:1px solid #868e96;border-radius:1000px;background:transparent;color:#868e96;font:700 12px/1 system-ui,sans-serif;letter-spacing:.25px;text-transform:uppercase}"
+    },
+    {
+      "name": "Header identity",
+      "kind": "nav",
+      "description": "Channel identity from the wrapping header; no sidebar or tab system exists.",
+      "html": "<div class=\"ds-identity\"><span>episodic</span><h1>Synthetic production channel</h1></div>",
+      "css": ".ds-identity{font:16px/1.55 system-ui,sans-serif;color:#000}.ds-identity>span{color:#09695d;font-weight:700}.ds-identity h1{margin:0;font:700 22px/1.4 system-ui,sans-serif}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Production workbench",
+    "overview": "The existing browser workbench is compact and utilitarian. System typography, bordered episode buttons and familiar Mantine controls keep production records readable without decorative imagery. Teal identifies the product and some interactions; episode information carries the hierarchy.\n\nThis captures the current implementation, not a replacement identity. The descriptive direction was confirmed during documentation. Depth is recorded as observed, not imposed as a new doctrine. Sources are `gui/src/theme.ts`, `gui/src/style.css`, `gui/src/main.tsx` and the installed Mantine 9.8.2 defaults. Synthetic desktop, tablet, phone and reflow captures were regenerated with `python gui/e2e/smoke.py`; desktop, phone and episode captures were visually inspected. No UI code changed in this pass.",
+    "keyCharacteristics": ["Compact controls and small corners.", "Plain text evidence, readable paths and restrained teal accents.", "A responsive lifecycle board with a separate inspection view."],
+    "rules": [],
+    "dos": ["Do retain the compact, utilitarian component character.", "Do use functional color names and distinguish authored tokens from Mantine defaults.", "Do preserve visible labels, native buttons and wrapping paths.", "Do keep stage, presence and verification meaning in text rather than color alone."],
+    "donts": ["Don't describe root declarations as effective body styles when Mantine overrides them.", "Don't invent a filled primary button, card shadow scale or custom animation system.", "Don't turn the current board layout or observed flatness into a global design doctrine.", "Don't present these synthetic browser checks as full accessibility conformance."]
+  }
+}

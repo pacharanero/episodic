@@ -8,6 +8,7 @@
 
 # Local-only private workspace
 /.private
+/.impeccable/config.local.json
 /gui/node_modules/
 /gui/dist/
 /.playwright-mcp/

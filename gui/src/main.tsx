@@ -50,14 +50,14 @@ function App() {
         {workspace.episodes.length === 0 && <p>No episode folders found. Create one with <code>eps episode new</code>, then refresh.</p>}
         {workspace.episodes.length > 0 && <div className="board">{workspace.stages.map(stage => {
           const entries = workspace.episodes.filter(item => item.entry.stage === stage && `${item.entry.base} ${item.report?.fields.title ?? ''} ${item.report?.fields.guest ?? ''}`.toLowerCase().includes(query.toLowerCase()));
-          return <section className="stage" key={stage} aria-label={stage}>
+          return <section className="stage" data-stage={stage} key={stage} aria-label={stage}>
             <h3>{stage} <span className="count">{entries.length}</span></h3>
             {entries.length === 0 && <p className="muted">{query ? 'No matching episodes' : 'No episodes'}</p>}
             {entries.map(item => <button className="episode" key={item.entry.path} onClick={() => setSelected(item.entry.path)}>
               <span className="muted">{item.entry.date}</span>
               <strong>{item.report?.fields.title ?? item.entry.base}</strong>
               {item.report?.fields.guest && <span>{item.report.fields.guest}</span>}
-              <span className="next">{item.report?.next_action ?? item.error}</span>
+              <span className={`next${item.error ? ' status' : ''}`} data-status={item.error ? 'warning' : undefined}>{item.report?.next_action ?? item.error}</span>
               {item.report && <span className="muted">{item.report.artefacts.filter(a => a.exists).length}/{item.report.artefacts.length} artefacts present</span>}
             </button>)}
           </section>;
@@ -84,19 +84,19 @@ function Episode({ item, back }: { item: Entry; back: () => void }) {
   return <article>
     <Button variant="subtle" leftSection={<ArrowLeft size={16} />} onClick={back}>Episodes</Button>
     <Title order={2} tabIndex={-1} ref={heading}>{report?.fields.title ?? item.entry.base}</Title>
-    <p>{item.entry.stage} · {item.entry.date}{report?.fields.guest && ` · ${report.fields.guest}`}</p>
+    <p><span className="stage-label" data-stage={item.entry.stage}>{item.entry.stage}</span> · {item.entry.date}{report?.fields.guest && ` · ${report.fields.guest}`}</p>
     <p className="path">{item.entry.path}</p>
     {item.links.length > 0 && <Group>{item.links.map(link => <Button component="a" key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" variant="default">{link.label}</Button>)}</Group>}
     {item.error && <Alert color="yellow">{item.error}</Alert>}
     {report && <>
       <h3>Next action</h3><p>{report.next_action}</p>
-      <p>Local upload readiness: {report.ready_for_upload ? 'ready' : 'not ready'}. This is not a remote verification.</p>
+      <p>Local upload readiness: <span className="status status-label" data-status={report.ready_for_upload ? 'ready' : 'warning'}>{report.ready_for_upload ? 'ready' : 'not ready'}</span>. This is not a remote verification.</p>
       <h3>Artefacts</h3>
       <ScrollArea><Table><Table.Thead><Table.Tr><Table.Th>Artefact</Table.Th><Table.Th>Status</Table.Th><Table.Th>Bytes</Table.Th><Table.Th>Path</Table.Th></Table.Tr></Table.Thead><Table.Tbody>
-        {report.artefacts.map(artefact => <Table.Tr key={artefact.kind}><Table.Td>{artefact.kind}</Table.Td><Table.Td>{artefact.exists ? 'Present, not independently verified' : 'Missing'}</Table.Td><Table.Td>{artefact.bytes?.toLocaleString() ?? '-'}</Table.Td><Table.Td className="path">{artefact.path}</Table.Td></Table.Tr>)}
+        {report.artefacts.map(artefact => <Table.Tr key={artefact.kind}><Table.Td>{artefact.kind}</Table.Td><Table.Td><span className="status status-label" data-status={artefact.exists ? 'present' : 'missing'}>{artefact.exists ? 'Present, not independently verified' : 'Missing'}</span></Table.Td><Table.Td>{artefact.bytes?.toLocaleString() ?? '-'}</Table.Td><Table.Td className="path">{artefact.path}</Table.Td></Table.Tr>)}
       </Table.Tbody></Table></ScrollArea>
       <h3>Findings</h3>
-      {report.findings.length === 0 ? <p>No findings from local inspection.</p> : <ul>{report.findings.map(finding => <li key={`${finding.code}:${finding.message}`}><strong>{finding.severity}: </strong>{finding.message}</li>)}</ul>}
+      {report.findings.length === 0 ? <p>No findings from local inspection.</p> : <ul>{report.findings.map(finding => <li key={`${finding.code}:${finding.message}`}><strong className="status" data-status={finding.severity}>{finding.severity}: </strong>{finding.message}</li>)}</ul>}
     </>}
     <p className="muted">Lifecycle moves, generation, file edits and YouTube publication are not enabled in this read-only increment.</p>
   </article>;
