@@ -16,19 +16,13 @@ pub fn inspect(path: &Path, format: OutputFormat) -> Result<()> {
     output::write(format, &report, &report.as_text())
 }
 
-pub fn links(path: &Path, format: OutputFormat) -> Result<()> {
+/// Links for one episode, generated from its record and the channel
+/// configuration. Contacts nothing.
+pub fn links(config_path: &Path, path: &Path, format: OutputFormat) -> Result<()> {
+    let config = channel::load(config_path)?;
     let report = episode::inspect(path)?;
-    let links = episode::links(&report.fields);
-    let text = if links.is_empty() {
-        "No YouTube links: no valid recorded Video ID.".to_owned()
-    } else {
-        links
-            .iter()
-            .map(|link| format!("{}: {}", link.label, link.url))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    output::write(format, &links, &text)
+    let links = crate::links::for_episode(&config, &report)?;
+    output::write(format, &links, &links.as_text())
 }
 
 pub fn validate(path: &Path, format: OutputFormat) -> Result<()> {

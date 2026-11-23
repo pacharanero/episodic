@@ -6,6 +6,7 @@
 import json
 import subprocess
 import tempfile
+import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -18,7 +19,27 @@ CAPTURES.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
     workspace = Path(temporary)
     config = workspace / "eps.toml"
-    config.write_text("[channel]\nid='synthetic'\nname='Synthetic production channel'\ntimezone='Europe/London'\n")
+    config.write_text("""[channel]
+id = 'synthetic'
+name = 'Synthetic production channel'
+timezone = 'Europe/London'
+
+[youtube]
+channel_id = 'UCsyntheticsyntheticsynt'
+
+[recording.vdo_ninja]
+guest_url = 'https://vdo.ninja/?room=synthetic-room&push=guest'
+
+[archive.forum]
+topic_url = 'https://forum.invalid/t/archive/1'
+
+[metadata.social.bluesky-draft]
+max_characters = 300
+""")
+
+    def image(path, size, colours):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["magick", "-size", size, f"gradient:{colours}", str(path)], check=True)
 
     def eps(*args):
         return subprocess.run([str(EPS), "--config", str(config), *args], check=True, capture_output=True, text=True)
@@ -33,6 +54,15 @@ with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
         folder = next((workspace / "episodes/in-planning").glob(date.replace("-", ".") + "-*"))
         if stage == "published":
             eps("episode", "set", str(folder), "Video ID=dQw4w9WgXcQ")
+            draft = workspace / "draft.txt"
+            draft.write_text("A synthetic conversation about careful review. #synthetic\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ\n")
+            eps("episode", "set-draft", str(folder), "Bluesky", "--from-file", str(draft))
+            draft.unlink()
+        if stage != "in-planning":
+            base = folder.name
+            image(folder / f"{base}.thumbnail.png", "1280x720", "#09695d-#1f2933")
+            for index, colours in enumerate(["#285c89-#f7f8f8", "#855600-#fff4dc", "#a52f35-#fceef0"], 1):
+                image(folder / f"{base}.frames" / f"frame-{index:02}.jpg", "640x360", colours)
         if stage != "in-planning":
             eps("episode", "promote", str(folder), stage, "--force")
     (workspace / "episodes/in-planning/2026.11.23-missing-record").mkdir()
@@ -41,6 +71,12 @@ with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
     try:
         url = server.stdout.readline().strip()
         assert url.startswith("http://127.0.0.1:"), "server must print a loopback URL"
+        origin, token = url.split("#", 1)
+
+        def current_fingerprint():
+            request = urllib.request.Request(origin + "api/fingerprint", headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(request) as response:
+                return json.load(response)["fingerprint"]
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(executable_path="/usr/bin/chromium", args=["--no-sandbox"])
             context = browser.new_context(reduced_motion="reduce")
@@ -49,6 +85,14 @@ with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(url)
             page.get_by_role("heading", name="Synthetic production channel").wait_for()
+            # Thumbnails load through the token and must actually decode.
+            page.wait_for_function("() => document.querySelectorAll('article.episode .card-thumbnail img').length === 2")
+            page.wait_for_function("() => [...document.querySelectorAll('article.episode img')].every(img => img.complete && img.naturalWidth > 0)")
+            card = page.locator("article.episode", has_text="Synthetic published discussion")
+            assert card.locator("a[data-kind=youtube_watch]").get_attribute("href") == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            assert card.locator("a[data-kind=youtube_studio]").get_attribute("href") == "https://studio.youtube.com/video/dQw4w9WgXcQ/edit"
+            assert page.get_by_role("link", name="Channel in YouTube Studio").get_attribute("href") == "https://studio.youtube.com/channel/UCsyntheticsyntheticsynt"
+            assert page.locator(".milestone-strip").count() == 3
 
             def assert_colour_contrast():
                 failures = page.evaluate("""() => {
@@ -84,7 +128,7 @@ with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"overflow at {name}"
                 page.screenshot(path=str(CAPTURES / f"{name}.png"), full_page=True)
             page.set_viewport_size({"width": 1440, "height": 900})
-            page.locator("button.episode").first.hover()
+            page.locator("article.episode").first.hover()
             assert_colour_contrast()
             page.screenshot(path=str(CAPTURES / "hover.png"), full_page=True)
             page.mouse.move(0, 0)
@@ -101,29 +145,51 @@ with tempfile.TemporaryDirectory(prefix="eps-gui-") as temporary:
             page.get_by_text("No model profiles configured.").wait_for()
             page.keyboard.press("Escape")
             page.get_by_role("textbox", name="Find an episode").fill("published discussion")
-            assert page.locator("button.episode").count() == 1
-            page.locator("button.episode").click()
+            assert page.locator("article.episode").count() == 1
+            page.locator(".card-open").click()
             page.get_by_role("heading", name="Artefacts", exact=True).wait_for()
+            assert page.get_by_role("link", name="Watch on YouTube").first.get_attribute("href") == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            assert page.locator(".milestone-list li").count() == 11
+            page.locator(".frames").scroll_into_view_if_needed()
+            page.wait_for_function("() => document.querySelectorAll('.frames img').length === 3 && [...document.querySelectorAll('.frames img, .thumbnail-large img')].every(img => img.naturalWidth > 0)")
+            compose = page.get_by_role("link", name="Compose on Bluesky")
+            assert compose.get_attribute("href").startswith("https://bsky.app/intent/compose?text=A%20synthetic%20conversation")
+            page.get_by_text("/ 300 characters", exact=False).wait_for()
             assert_colour_contrast()
-            assert page.get_by_role("link", name="Watch on YouTube").get_attribute("href") == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
             page.screenshot(path=str(CAPTURES / "episode.png"), full_page=True)
+            page.set_viewport_size({"width": 390, "height": 844})
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "episode overflows on a phone"
+            page.screenshot(path=str(CAPTURES / "episode-phone.png"), full_page=True)
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.get_by_role("button", name="Enlarge frame-02.jpg").click()
+            page.get_by_role("dialog").locator("img").wait_for()
+            page.keyboard.press("Escape")
+            page.get_by_role("button", name="Preview Show notes").click()
+            page.get_by_role("dialog").locator("pre.preview").wait_for()
+            page.screenshot(path=str(CAPTURES / "preview.png"))
+            page.keyboard.press("Escape")
             page.get_by_role("button", name="Episodes", exact=True).click()
             page.get_by_role("textbox", name="Find an episode").fill("no match")
-            assert page.locator("button.episode").count() == 0
+            assert page.locator("article.episode").count() == 0
             page.get_by_role("textbox", name="Find an episode").fill("")
+
+            # Everything above was read-only. Now change the workspace from
+            # outside the browser and expect the board to follow.
+            after = {p.relative_to(workspace): p.read_bytes() for p in workspace.rglob("*") if p.is_file()}
+            assert before == after, "read-only browser workflow must not alter the workspace"
+            eps("episode", "new", "2026-11-24", "Arrived while watching")
+            page.get_by_role("button", name="Arrived while watching").wait_for(timeout=15000)
             page.route("**/api/workspace", lambda route: route.fulfill(status=500, body="Unavailable"))
             page.get_by_role("button", name="Refresh", exact=True).click()
             page.get_by_role("alert").wait_for()
             page.screenshot(path=str(CAPTURES / "error.png"), full_page=True)
             page.unroute("**/api/workspace")
-            page.route("**/api/workspace", lambda route: route.fulfill(content_type="application/json", body=json.dumps({"channel": {"name": "Empty channel", "id": "empty"}, "models": [], "episodes": [], "stages": []})))
+            page.route("**/api/workspace", lambda route: route.fulfill(content_type="application/json", body=json.dumps({"channel": {"name": "Empty channel", "id": "empty"}, "channel_links": [], "models": [], "episodes": [], "stages": [], "fingerprint": current_fingerprint()})))
             page.get_by_role("button", name="Refresh", exact=True).click()
             page.get_by_text("No episode folders found.", exact=False).wait_for()
             page.screenshot(path=str(CAPTURES / "empty.png"), full_page=True)
             assert not errors, errors
             browser.close()
-        after = {p.relative_to(workspace): p.read_bytes() for p in workspace.rglob("*") if p.is_file()}
-        assert before == after, "read-only browser workflow must not alter the workspace"
         print("Browser smoke passed; screenshots saved under .private/gui-captures/")
     finally:
         server.terminate()

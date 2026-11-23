@@ -33,10 +33,23 @@ main { padding: 24px; min-height: 65vh; }
 [data-stage="not-for-publishing"] { --stage-color: var(--muted); }
 .stage h3 { font-size: 15px; color: var(--stage-color, var(--muted)); border-bottom: 2px solid currentColor; padding-bottom: 12px; margin: 0 0 16px; }
 .count { color: var(--muted); font-weight: 400; }
-.episode { width: 100%; text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: 4px; padding: 16px; margin-bottom: 12px; cursor: pointer; color: inherit; font: inherit; }
-.episode > span, .episode > strong { display: block; overflow-wrap: anywhere; }
-.episode strong { margin: 6px 0; }
+/* Episode card: the title button's hit area covers the card (::after); the
+   YouTube links sit above it as separate controls. */
+.episode { position: relative; border: 1px solid var(--border); background: var(--surface); border-radius: 4px; margin-bottom: 12px; overflow: hidden; }
 .episode:hover { border-color: var(--accent); background: var(--accent-soft); }
+.episode:has(.card-open:focus-visible) { outline: 3px solid var(--accent); outline-offset: 3px; }
+.card-body { padding: 16px; }
+.card-body > span { display: block; overflow-wrap: anywhere; }
+.card-title { margin: 6px 0; font-size: 1rem; line-height: 1.4; }
+.card-open { all: unset; cursor: pointer; overflow-wrap: anywhere; }
+.card-open::after { content: ""; position: absolute; inset: 0; }
+.card-open:focus-visible { outline: none; }
+.card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.card-actions { position: relative; z-index: 1; }
+.card-thumbnail { aspect-ratio: 16 / 9; border-bottom: 1px solid var(--border); }
+.image-frame { background: var(--divider); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.image-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.brand-icon.youtube { color: #ff0000; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .muted, footer { color: var(--muted); font-size: 14px; }
 .next { border-top: 1px solid var(--divider); margin-top: 12px; padding-top: 10px; font-size: 14px; }
@@ -45,17 +58,60 @@ main { padding: 24px; min-height: 65vh; }
 .status[data-status="missing"], .status[data-status="warning"] { color: var(--warning); }
 .status[data-status="error"] { color: var(--danger); }
 .status[data-status="ready"] { color: var(--accent); }
+.status[data-status="possibly_stale"] { color: var(--warning); }
+.status[data-status="failing"] { color: var(--danger); }
+.status[data-status="not_started"], .status[data-status="not_applicable"] { color: var(--muted); }
 .status-label, .stage-label { display: inline; padding: 2px 6px; border-radius: 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .status-label[data-status="present"], .status-label[data-status="info"] { background: var(--info-soft); }
 .status-label[data-status="missing"], .status-label[data-status="warning"] { background: var(--warning-soft); }
 .status-label[data-status="error"] { background: var(--danger-soft); }
 .status-label[data-status="ready"] { background: var(--accent-soft); }
+.status-label[data-status="possibly_stale"] { background: var(--warning-soft); }
+.status-label[data-status="failing"] { background: var(--danger-soft); }
+.status-label[data-status="not_started"], .status-label[data-status="not_applicable"] { background: var(--canvas); }
+
+/* Milestone marks differ in shape and fill as well as colour. */
+.milestone-strip { display: flex; gap: 3px; margin: 10px 0 0; }
+.mark { display: inline-block; flex: none; width: 10px; height: 10px; box-sizing: border-box; border: 1.5px solid var(--muted); border-radius: 2px; background: transparent; }
+.mark[data-state="present"] { border-color: var(--accent); background: var(--accent); }
+.mark[data-state="not_applicable"] { border-style: dashed; border-color: var(--muted); background: var(--divider); }
+.mark[data-state="possibly_stale"] { border-color: var(--warning); background: linear-gradient(135deg, var(--warning) 50%, transparent 50%); }
+.mark[data-state="failing"] { border-color: var(--danger); background: var(--danger); border-radius: 50%; }
+.milestone-list { list-style: none; padding: 0; margin: 0; }
+.milestone-list li { display: grid; grid-template-columns: 14px minmax(120px, 170px) auto minmax(0, 1fr); align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--divider); }
+.milestone-detail { overflow-wrap: anywhere; }
 .stage-label { color: var(--stage-color, var(--muted)); background: var(--surface); border: 1px solid currentColor; }
 .path { overflow-wrap: anywhere; font-family: monospace; }
-article { max-width: 1200px; }
-footer { border-top: 1px solid var(--border); padding: 16px 24px; background: var(--surface); }
+.path-row { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
+.identity { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.episode-view { max-width: 1440px; }
+.episode-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.episode-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px; align-items: start; }
+.episode-main h3 { margin-top: 28px; }
+.tools { border: 1px solid var(--border); background: var(--surface); border-radius: 4px; padding: 16px; margin-top: 28px; }
+.tools h3 { margin-top: 0; }
+.tools h4 { margin: 16px 0 6px; font-size: 15px; }
+.link-group ul { list-style: none; padding: 0; margin: 0; }
+.labelled-link { display: inline-flex; align-items: center; gap: 8px; padding: 6px 0; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.labelled-link:hover { text-decoration: underline; }
+.labelled-link-icon { display: inline-flex; color: var(--muted); }
+.publicity { border-top: 1px solid var(--divider); padding: 12px 0; }
+.publicity-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.publicity-text { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--canvas); border: 1px solid var(--divider); border-radius: 4px; padding: 8px 10px; font-size: 14px; margin: 8px 0 4px; }
+.thumbnail-large { aspect-ratio: 16 / 9; max-width: 640px; border: 1px solid var(--border); border-radius: 4px; }
+.frames { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.frames li { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.frame { all: unset; cursor: zoom-in; display: block; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.frame:hover { border-color: var(--accent); }
+.frame:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.frame .image-frame { aspect-ratio: 16 / 9; }
+.frame-large img { object-fit: contain; max-height: 75vh; }
+.preview { max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; background: var(--canvas); border: 1px solid var(--divider); border-radius: 4px; padding: 12px; margin: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+footer { display: flex; justify-content: space-between; gap: 8px 24px; flex-wrap: wrap; border-top: 1px solid var(--border); padding: 16px 24px; background: var(--surface); }
 .skip { position: absolute; top: -100px; left: 12px; color: var(--accent); background: var(--surface); padding: 12px; z-index: 100; }
 .skip:focus { top: 12px; }
-@media (max-width: 1000px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } .episode-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .milestone-list li { grid-template-columns: 14px minmax(0, 1fr) auto; } .milestone-detail { grid-column: 2 / -1; } }
 @media (max-width: 560px) { .board { grid-template-columns: 1fr; } main, header { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

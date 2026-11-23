@@ -2,9 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Read-only browser adapter. There is deliberately no generic command endpoint.
-//! Episode inspection uses the same engine function as `episode inspect`.
+//! Episode inspection, milestones and links use the same engine functions as
+//! `episode inspect` and `episode links`.
+//!
+//! The only workspace files served are an episode's thumbnail, its frame
+//! candidates and a fixed set of text artefacts, each resolved by name inside
+//! one episode folder and refused if it resolves outside the episodes root.
+//! This is not a workspace file server.
 
-use crate::{channel, episode, lifecycle};
+use crate::{channel, episode, lifecycle, links, milestone};
 use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
@@ -17,10 +23,31 @@ use axum::{
 };
 use serde::Serialize;
 use std::{
+    collections::hash_map::DefaultHasher,
+    fs,
+    hash::{Hash, Hasher},
+    io::Read,
     path::{Component, Path, PathBuf},
     sync::Arc,
+    time::UNIX_EPOCH,
 };
 use tokio::sync::Semaphore;
+
+/// Frame candidates listed per episode. Extraction makes a dozen or so.
+const FRAME_LIMIT: usize = 48;
+const IMAGE_LIMIT: u64 = 16 * 1024 * 1024;
+const TEXT_LIMIT: u64 = 256 * 1024;
+
+/// Text artefacts that can be previewed, by kind and file suffix.
+const PREVIEWS: &[(&str, &str)] = &[
+    ("metadata", ".episode-data.md"),
+    ("show_notes", ".md"),
+    ("chapters", ".chapters.txt"),
+    ("tags", ".tags.txt"),
+    ("description", ".youtube-description.txt"),
+    ("captions", ".srt"),
+    ("transcript", ".txt"),
+];
 
 #[derive(Clone)]
 struct Server {
@@ -28,7 +55,10 @@ struct Server {
     assets: PathBuf,
     authority: String,
     token: String,
+    /// Workspace scans: refused rather than queued when busy.
     reads: Arc<Semaphore>,
+    /// Single-file reads: queued, so a board of thumbnails loads in turn.
+    files: Arc<Semaphore>,
 }
 
 pub fn run(config: Option<PathBuf>, assets: PathBuf, port: u16, dry_run: bool) -> Result<()> {
@@ -53,7 +83,8 @@ pub fn run(config: Option<PathBuf>, assets: PathBuf, port: u16, dry_run: bool) -
             assets,
             authority: authority.clone(),
             token: token.clone(),
-            reads: Arc::new(Semaphore::new(2)),
+            reads: Arc::new(Semaphore::new(3)),
+            files: Arc::new(Semaphore::new(4)),
         };
         println!("http://{authority}/#{token}");
         eprintln!("Read-only workbench. Keep the URL private. Press Ctrl+C to stop.");
@@ -65,6 +96,10 @@ pub fn run(config: Option<PathBuf>, assets: PathBuf, port: u16, dry_run: bool) -
 fn router(state: Server) -> Router {
     Router::new()
         .route("/api/workspace", get(workspace))
+        .route("/api/fingerprint", get(fingerprint))
+        .route("/api/episodes/{base}/thumbnail", get(thumbnail))
+        .route("/api/episodes/{base}/frames/{name}", get(frame))
+        .route("/api/episodes/{base}/artefacts/{kind}", get(preview))
         .route("/", get(index))
         .route("/assets/{*path}", get(asset))
         .layer(middleware::from_fn_with_state(state.clone(), protect))
@@ -97,7 +132,8 @@ async fn protect(State(state): State<Server>, request: Request<Body>, next: Next
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
-    headers.insert(header::CONTENT_SECURITY_POLICY, "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'".parse().unwrap());
+    // Images are fetched with the bearer token and shown from blob: URLs.
+    headers.insert(header::CONTENT_SECURITY_POLICY, "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'".parse().unwrap());
     headers.insert("x-content-type-options", "nosniff".parse().unwrap());
     headers.insert("referrer-policy", "no-referrer".parse().unwrap());
     response
@@ -139,9 +175,11 @@ async fn serve_asset(root: &Path, path: &Path) -> Response {
 #[derive(Serialize)]
 struct Workspace {
     channel: channel::ChannelIdentity,
+    channel_links: Vec<links::Link>,
     stages: &'static [&'static str],
     models: Vec<Routing>,
     episodes: Vec<Entry>,
+    fingerprint: String,
 }
 
 #[derive(Serialize)]
@@ -157,7 +195,11 @@ struct Entry {
     entry: lifecycle::EpisodeEntry,
     report: Option<episode::EpisodeReport>,
     error: Option<String>,
-    links: Vec<episode::EpisodeLink>,
+    links: links::EpisodeLinks,
+    frames: Vec<String>,
+    /// Changes whenever the thumbnail file does, so the page refetches it
+    /// only then. Absent when there is no thumbnail.
+    thumbnail: Option<String>,
 }
 
 async fn workspace(State(state): State<Server>) -> Response {
@@ -184,6 +226,149 @@ async fn workspace(State(state): State<Server>) -> Response {
     }
 }
 
+async fn fingerprint(State(state): State<Server>) -> Response {
+    let Ok(permit) = state.reads.clone().try_acquire_owned() else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
+    match tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        workspace_fingerprint(&state.config)
+    })
+    .await
+    {
+        Ok(Ok(value)) => Json(serde_json::json!({ "fingerprint": value })).into_response(),
+        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+async fn thumbnail(State(state): State<Server>, WebPath(base): WebPath<String>) -> Response {
+    serve_file(state, move |config| {
+        let folder = locate(config, &base)?;
+        let file = contained(&folder, &format!("{base}.thumbnail.png"))?;
+        read_image(&file)
+    })
+    .await
+}
+
+async fn frame(
+    State(state): State<Server>,
+    WebPath((base, name)): WebPath<(String, String)>,
+) -> Response {
+    serve_file(state, move |config| {
+        if !milestone::is_frame_name(&name) {
+            bail!("not a frame name");
+        }
+        let folder = locate(config, &base)?;
+        let file = contained(&folder, &format!("{base}.frames/{name}"))?;
+        read_image(&file)
+    })
+    .await
+}
+
+async fn preview(
+    State(state): State<Server>,
+    WebPath((base, kind)): WebPath<(String, String)>,
+) -> Response {
+    serve_file(state, move |config| {
+        let suffix = PREVIEWS
+            .iter()
+            .find(|(known, _)| *known == kind)
+            .map(|(_, suffix)| *suffix)
+            .context("unknown preview")?;
+        let folder = locate(config, &base)?;
+        let file = contained(&folder, &format!("{base}{suffix}"))?;
+        let bytes = fs::metadata(&file)?.len();
+        let mut buffer = Vec::new();
+        fs::File::open(&file)?
+            .take(TEXT_LIMIT)
+            .read_to_end(&mut buffer)?;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "kind": kind,
+            "bytes": bytes,
+            "truncated": bytes > TEXT_LIMIT,
+            "text": String::from_utf8_lossy(&buffer),
+        }))?;
+        Ok(("application/json", body))
+    })
+    .await
+}
+
+/// Run a blocking single-file read. Every failure is a plain 404, so the
+/// response never says whether a path exists outside what was asked for.
+async fn serve_file<F>(state: Server, read: F) -> Response
+where
+    F: FnOnce(&Path) -> Result<(&'static str, Vec<u8>)> + Send + 'static,
+{
+    let Ok(permit) = state.files.clone().acquire_owned().await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    match tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        read(&state.config)
+    })
+    .await
+    {
+        Ok(Ok((content_type, bytes))) => {
+            ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+        }
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// The folder of the one episode with this base name, after checking it and
+/// its top-level entries stay inside the episodes root.
+fn locate(config_path: &Path, base: &str) -> Result<PathBuf> {
+    if lifecycle_base(base).is_none() {
+        bail!("not an episode name");
+    }
+    let config = channel::load(config_path)?;
+    let root = config.episodes_path(config_path)?;
+    let matches = lifecycle::list(&root, None)?
+        .episodes
+        .into_iter()
+        .filter(|entry| entry.base == base)
+        .collect::<Vec<_>>();
+    let [entry] = matches.as_slice() else {
+        bail!("episode not found or ambiguous");
+    };
+    safe_episode(&entry.path, &root)?;
+    Ok(entry.path.canonicalize()?)
+}
+
+fn lifecycle_base(base: &str) -> Option<&str> {
+    (base.len() <= 200
+        && !base.starts_with('.')
+        && base
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')))
+    .then_some(base)
+}
+
+/// A regular file at `relative` inside a canonical episode folder, refused if
+/// any symlink takes it outside that folder.
+fn contained(folder: &Path, relative: &str) -> Result<PathBuf> {
+    let file = folder.join(relative).canonicalize()?;
+    if !file.starts_with(folder) || !file.is_file() {
+        bail!("not a file in the episode folder");
+    }
+    Ok(file)
+}
+
+fn read_image(file: &Path) -> Result<(&'static str, Vec<u8>)> {
+    if fs::metadata(file)?.len() > IMAGE_LIMIT {
+        bail!("image too large to preview");
+    }
+    let bytes = fs::read(file)?;
+    let content_type = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else {
+        bail!("not a PNG or JPEG image");
+    };
+    Ok((content_type, bytes))
+}
+
 fn read_workspace(config_path: &Path) -> Result<Workspace> {
     let config = channel::load(config_path)?;
     let episodes_path = config.episodes_path(config_path)?;
@@ -208,18 +393,32 @@ fn read_workspace(config_path: &Path) -> Result<Workspace> {
                 ),
             ),
         };
-        let links = report
-            .as_ref()
-            .map(|report| episode::links(&report.fields))
-            .unwrap_or_default();
+        let (links, frames, thumbnail) = match &report {
+            Some(report) => (
+                links::for_episode(&config, report).unwrap_or_default(),
+                milestone::frames(&report.episode_path, &report.base)
+                    .into_iter()
+                    .take(FRAME_LIMIT)
+                    .collect(),
+                version(
+                    &report
+                        .episode_path
+                        .join(format!("{}.thumbnail.png", report.base)),
+                ),
+            ),
+            None => (links::EpisodeLinks::default(), Vec::new(), None),
+        };
         entries.push(Entry {
             entry,
             report,
             error,
             links,
+            frames,
+            thumbnail,
         });
     }
     let mut models = Vec::new();
+    let channel_links = links::channel(&config);
     if let Some(policy) = config.llm {
         for (task, profile) in
             std::iter::once(("Default".to_owned(), policy.default_profile)).chain(policy.tasks)
@@ -236,10 +435,53 @@ fn read_workspace(config_path: &Path) -> Result<Workspace> {
     }
     Ok(Workspace {
         channel: config.channel,
+        channel_links,
         stages: lifecycle::STAGES,
         models,
         episodes: entries,
+        fingerprint: workspace_fingerprint(config_path)?,
     })
+}
+
+/// Size and modification time of a file, as an opaque change marker.
+fn version(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok().filter(fs::Metadata::is_file)?;
+    let modified = metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{}-{modified}", metadata.len()))
+}
+
+/// A cheap marker that changes when the configuration, the set of episode
+/// folders, or any top-level file or frame in them changes. The page polls it
+/// and refreshes only when it moves. Reads metadata only, never contents.
+fn workspace_fingerprint(config_path: &Path) -> Result<String> {
+    let config = channel::load(config_path)?;
+    let root = config.episodes_path(config_path)?;
+    let mut hasher = DefaultHasher::new();
+    version(config_path).hash(&mut hasher);
+    for entry in lifecycle::list(&root, None)?.episodes {
+        entry.path.hash(&mut hasher);
+        let frames = entry.path.join(format!("{}.frames", entry.base));
+        for directory in [&entry.path, &frames] {
+            let Ok(children) = fs::read_dir(directory) else {
+                continue;
+            };
+            let mut seen = children
+                .filter_map(|child| child.ok())
+                .map(|child| {
+                    let path = child.path();
+                    (child.file_name(), version(&path))
+                })
+                .collect::<Vec<_>>();
+            seen.sort();
+            seen.hash(&mut hasher);
+        }
+    }
+    Ok(format!("{:016x}", hasher.finish()))
 }
 
 // Inspection reads only canonical, top-level artefacts. Refuse symlinks outside
@@ -249,7 +491,7 @@ fn safe_episode(path: &Path, root: &Path) -> Result<()> {
     if !path.canonicalize()?.starts_with(&root) {
         bail!("episode outside workspace");
     }
-    for child in std::fs::read_dir(path)? {
+    for child in fs::read_dir(path)? {
         let child = child?.path();
         if child.is_symlink() && !child.canonicalize()?.starts_with(&root) {
             bail!("artefact outside workspace");
@@ -262,6 +504,8 @@ fn safe_episode(path: &Path, root: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    const CONFIG: &str = "[channel]\nid='fixture'\nname='Fixture'\ntimezone='Europe/London'\n";
+
     #[test]
     fn access_requires_exact_host_origin_and_api_token() {
         let server = Server {
@@ -270,6 +514,7 @@ mod tests {
             authority: "127.0.0.1:1234".into(),
             token: "secret".into(),
             reads: Arc::new(Semaphore::new(2)),
+            files: Arc::new(Semaphore::new(2)),
         };
         let mut headers = HeaderMap::new();
         assert!(!authorised(&headers, &server, false));
@@ -297,7 +542,7 @@ mod tests {
     fn workspace_exposes_routing_but_not_credential_references() {
         let temp = tempfile::tempdir().unwrap();
         let config = temp.path().join("eps.toml");
-        std::fs::write(&config, "[channel]\nid='fixture'\nname='Fixture'\ntimezone='Europe/London'\n[llm]\ndefault_profile='editor'\n[llm.profiles.editor]\nprovider='anthropic'\nmodel='example'\napi_key_env='DO_NOT_EXPOSE_ME'\n").unwrap();
+        fs::write(&config, format!("{CONFIG}[llm]\ndefault_profile='editor'\n[llm.profiles.editor]\nprovider='anthropic'\nmodel='example'\napi_key_env='DO_NOT_EXPOSE_ME'\n")).unwrap();
         let value = serde_json::to_value(read_workspace(&config).unwrap()).unwrap();
         assert_eq!(value["models"][0]["model"], "example");
         assert!(!value.to_string().contains("DO_NOT_EXPOSE_ME"));
@@ -310,9 +555,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let folder = root.path().join("2026.11.23-example");
-        std::fs::create_dir(&folder).unwrap();
+        fs::create_dir(&folder).unwrap();
         assert!(safe_episode(&folder, root.path()).is_ok());
-        std::fs::write(outside.path().join("secret"), "private").unwrap();
+        fs::write(outside.path().join("secret"), "private").unwrap();
         std::os::unix::fs::symlink(
             outside.path().join("secret"),
             folder.join("example.tags.txt"),
@@ -320,5 +565,58 @@ mod tests {
         .unwrap();
         assert!(safe_episode(&folder, root.path()).is_err());
         assert!(safe_episode(outside.path(), root.path()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn served_files_stay_inside_their_episode_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join("eps.toml");
+        fs::write(&config, CONFIG).unwrap();
+        let base = "2026.11.23-example";
+        let folder = temp.path().join("episodes/in-progress").join(base);
+        let frames = folder.join(format!("{base}.frames"));
+        fs::create_dir_all(&frames).unwrap();
+        fs::write(
+            folder.join(format!("{base}.thumbnail.png")),
+            b"\x89PNG\r\n\x1a\nrest",
+        )
+        .unwrap();
+        fs::write(frames.join("frame-01.jpg"), [0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
+        fs::write(frames.join("notes.jpg"), b"not an image").unwrap();
+        // A symlink inside the frames directory that escapes the episode.
+        fs::write(
+            temp.path().join("eps-secret.png"),
+            b"\x89PNG\r\n\x1a\nsecret",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(temp.path().join("eps-secret.png"), frames.join("leak.png"))
+            .unwrap();
+
+        let folder = locate(&config, base).unwrap();
+        let thumbnail = contained(&folder, &format!("{base}.thumbnail.png")).unwrap();
+        assert_eq!(read_image(&thumbnail).unwrap().0, "image/png");
+        let frame = contained(&folder, &format!("{base}.frames/frame-01.jpg")).unwrap();
+        assert_eq!(read_image(&frame).unwrap().0, "image/jpeg");
+        let disguised = contained(&folder, &format!("{base}.frames/notes.jpg")).unwrap();
+        assert!(read_image(&disguised).is_err());
+        assert!(contained(&folder, &format!("{base}.frames/leak.png")).is_err());
+        assert!(contained(&folder, "../../../eps.toml").is_err());
+        for bad in ["..", "../eps", ".hidden", "a/b", "2026.11.23-missing"] {
+            assert!(locate(&config, bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_fingerprint_moves_only_when_files_change() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join("eps.toml");
+        fs::write(&config, CONFIG).unwrap();
+        let folder = temp.path().join("episodes/in-planning/2026.11.23-example");
+        fs::create_dir_all(&folder).unwrap();
+        let first = workspace_fingerprint(&config).unwrap();
+        assert_eq!(first, workspace_fingerprint(&config).unwrap());
+        fs::write(folder.join("2026.11.23-example.md"), "notes").unwrap();
+        assert_ne!(first, workspace_fingerprint(&config).unwrap());
     }
 }

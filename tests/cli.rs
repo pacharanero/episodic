@@ -2247,6 +2247,55 @@ fn retention_audit_and_quarantine_preserve_the_uploaded_master() {
 }
 
 #[test]
+fn episode_links_come_from_the_record_and_configuration() {
+    let workspace = Workspace::new();
+    workspace
+        .eps(&["episode", "new", "2026-09-15", "Rural informatics"])
+        .unwrap();
+    let episode = workspace
+        .root
+        .join("episodes/in-planning/2026.09.15-rural-informatics");
+    let links = |workspace: &Workspace| -> Value {
+        let output = workspace
+            .eps(&[
+                "--format",
+                "json",
+                "episode",
+                "links",
+                episode.to_str().unwrap(),
+            ])
+            .unwrap();
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+
+    let before = links(&workspace);
+    assert_eq!(before["youtube"], serde_json::json!([]));
+    assert_eq!(
+        before["recording"][0]["url"],
+        "https://example.invalid/guest"
+    );
+    assert_eq!(
+        before["destinations"][0]["url"],
+        "https://forum.invalid/archive"
+    );
+
+    workspace
+        .eps(&[
+            "episode",
+            "set",
+            episode.to_str().unwrap(),
+            "Video ID=dQw4w9WgXcQ",
+        ])
+        .unwrap();
+    let after = links(&workspace);
+    assert_eq!(
+        after["youtube"][0]["url"],
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    );
+    assert_eq!(after["youtube"][1]["kind"], "youtube_studio");
+}
+
+#[test]
 fn command_registry_exposes_schema_template_and_safety() {
     let commands = cargo_bin_cmd!("eps")
         .args(["commands", "--format", "json"])

@@ -321,7 +321,10 @@ pub(crate) fn run_episode(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        EpisodeCommand::Links { path } => commands::episode::links(&path, format),
+        EpisodeCommand::Links { path } => {
+            let config = channel::resolve_path(config)?;
+            commands::episode::links(&config, &path, format)
+        }
         EpisodeCommand::Inspect { path } => commands::episode::inspect(&path, format),
         EpisodeCommand::Validate { path } => commands::episode::validate(&path, format),
         EpisodeCommand::Set(args) => commands::episode::set(

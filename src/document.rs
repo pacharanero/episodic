@@ -781,6 +781,91 @@ impl Document {
     }
 }
 
+/// One platform under the publicity section of an episode record.
+#[derive(Debug, Serialize)]
+pub struct SocialSection {
+    pub platform: String,
+    pub post_url: Option<String>,
+    pub post_date: Option<String>,
+    /// The first fenced block under the platform's `Draft` heading.
+    pub draft: Option<String>,
+}
+
+const SOCIAL_HEADINGS: &[&str] = &["Social Media & Publicity", "Social Media", "Publicity"];
+
+impl Document {
+    /// Platform sections under the publicity heading, read with the same
+    /// fence-aware scan as the writers. A record without the section has none.
+    pub fn social_sections(&self) -> Vec<SocialSection> {
+        let info = self.structure();
+        let Ok((heading, body)) = self.locate_section(SOCIAL_HEADINGS, &info) else {
+            return Vec::new();
+        };
+        let level = info[heading].heading.expect("located line is a heading") + 1;
+        let mut sections = Vec::new();
+        for start in body.clone() {
+            if info[start].heading != Some(level) {
+                continue;
+            }
+            let Some((_, platform)) = parse_heading(&self.lines[start].text) else {
+                continue;
+            };
+            let end = (start + 1..body.end)
+                .find(|index| info[*index].heading.is_some_and(|found| found <= level))
+                .unwrap_or(body.end);
+            let mut section = SocialSection {
+                platform,
+                post_url: None,
+                post_date: None,
+                draft: None,
+            };
+            // Archive and other sections share the heading; only a section
+            // with a post field or a draft heading is a social platform.
+            let mut platform_shaped = false;
+            for (index, line_info) in info.iter().enumerate().take(end).skip(start + 1) {
+                if line_info.fenced {
+                    continue;
+                }
+                let text = &self.lines[index].text;
+                if let (Some(label), Some((_, value))) = (field_label(text), field_value(text)) {
+                    let value =
+                        (!is_placeholder(value)).then(|| value.trim_matches('`').to_owned());
+                    match label {
+                        "Post URL" => {
+                            platform_shaped = true;
+                            section.post_url = value;
+                        }
+                        "Post Date" => section.post_date = value,
+                        _ => {}
+                    }
+                }
+                let is_draft = line_info.heading.is_some()
+                    && parse_heading(text)
+                        .is_some_and(|(_, title)| title.eq_ignore_ascii_case("Draft"));
+                platform_shaped |= is_draft;
+                if is_draft
+                    && section.draft.is_none()
+                    && let Ok((open, close)) = self.locate_fence(index)
+                    && close < end
+                {
+                    let draft = self.lines[open + 1..close]
+                        .iter()
+                        .map(|line| line.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !is_placeholder(&draft) {
+                        section.draft = Some(draft);
+                    }
+                }
+            }
+            if platform_shaped {
+                sections.push(section);
+            }
+        }
+        sections
+    }
+}
+
 /// An unset field: empty, or a `[To be added]` style placeholder.
 pub fn is_placeholder(value: &str) -> bool {
     let value = value.trim();
@@ -1197,6 +1282,32 @@ Human notes.
             !fields
                 .iter()
                 .any(|(_, _, value)| value.contains("Original human-reviewed"))
+        );
+    }
+
+    #[test]
+    fn reads_social_sections_with_their_drafts() {
+        let sections = document(CANONICAL).social_sections();
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].platform, "Bluesky");
+        assert_eq!(sections[0].post_url, None);
+        assert_eq!(
+            sections[0].draft.as_deref(),
+            Some("Original human-reviewed Bluesky draft.")
+        );
+
+        let source = "## Social Media & Publicity\n\n### Forum Archive\n\n- **Archive post URL**: https://forum.invalid/t/1\n\n### Mastodon\n\n- **Post URL**: https://example.social/@a/1\n\n#### Draft\n\n```text\n[To be drafted]\n```\n\n### LinkedIn\n\n#### Draft\n\n```text\n- **Post URL**: not a field\n```\n\n## Notes\n";
+        let sections = document(source).social_sections();
+        assert_eq!(sections.len(), 2);
+        assert_eq!(
+            sections[0].post_url.as_deref(),
+            Some("https://example.social/@a/1")
+        );
+        assert_eq!(sections[0].draft, None);
+        assert_eq!(sections[1].post_url, None);
+        assert_eq!(
+            sections[1].draft.as_deref(),
+            Some("- **Post URL**: not a field")
         );
     }
 

@@ -102,7 +102,8 @@ Functional names describe the implemented palette; the frontmatter owns exact va
 - Canvas and root text are declarations on the document root. Mantine overrides them on the body; canvas is visible beyond the body's content height. Do not treat root text as the observed body color.
 - Muted text identifies dates, counts, artefact summaries and footer guidance.
 - Border divides the shell and outlines episode cards; divider separates each episode's next action. Control border and control hover belong to Mantine's default controls.
-- Alerts retain Mantine's red and yellow semantic variants; there is no custom status palette. The read-only badge uses Mantine's outlined gray variant.
+- Status colours are authored tokens in `gui/src/style.css`: info (blue), warning (amber), danger (red) and accent (teal), each with a soft background. Stage headings, status labels and milestone marks use them, always alongside text or shape. Alerts retain Mantine's red and yellow variants. The read-only badge uses Mantine's outlined gray variant.
+- YouTube red (#ff0000) appears only on the YouTube and YouTube Studio marks, which identify links to those services.
 
 ## Typography
 
@@ -126,7 +127,7 @@ Reduced-motion preferences disable animations and transitions through the global
 
 ## Shapes
 
-Episode cards and default Mantine controls have small corners, using the shared small radius. Cards use a single-pixel border; stage headings use a two-pixel bottom rule. The outlined read-only badge retains Mantine's pill shape. There is no illustration, photographic or decorative shape system to extract.
+Episode cards and default Mantine controls have small corners, using the shared small radius. Cards use a single-pixel border; stage headings use a two-pixel bottom rule. The outlined read-only badge retains Mantine's pill shape. Episode thumbnails are the only imagery: real channel artwork shown at 16:9 on cards, in the episode view and in the frame-candidate grid. There is no illustration or decorative shape system.
 
 ## Components
 
@@ -136,7 +137,15 @@ Default bordered Mantine buttons provide Channel, Refresh and recorded external 
 
 ### Episode cards
 
-The entire card is a native button. Content reads date, bold title, optional guest, separated next action and artefact count. Long text wraps rather than truncating. Hover changes the border to workbench teal. There is no selected-card or drag-and-drop state.
+A card is an article whose title is the native button that opens the episode; the button's hit area is stretched over the card, so the whole card is clickable while the YouTube links remain separate controls (interactive elements are never nested). Content reads thumbnail (when one exists), date, bold title, optional guest, milestone strip, separated next action, milestone count and YouTube icon links. Long text wraps rather than truncating. Hover changes the border to workbench teal; keyboard focus on the title outlines the whole card. There is no selected-card or drag-and-drop state.
+
+### Milestone marks
+
+Ten-pixel marks in production order. State is carried by shape and fill as well as colour: filled square present, hollow square not started, diagonal half-fill possibly stale, red circle failing, dashed square not applicable. The strip has a text summary as its accessible name; the episode view lists every milestone with a text status.
+
+### Brand icons
+
+The YouTube and YouTube Studio marks come from Simple Icons and are used only as icon-only links with an accessible name and a tooltip, on cards, the episode heading and the channel header. Other link icons are Lucide.
 
 ### Search field
 

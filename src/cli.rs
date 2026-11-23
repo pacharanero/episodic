@@ -391,7 +391,7 @@ pub(crate) enum ChannelCommand {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum EpisodeCommand {
-    /// Show YouTube links derived from the locally recorded video ID; contacts nothing.
+    /// Show the episode's YouTube, recording, destination and publicity links; contacts nothing.
     Links {
         /// Episode directory or canonical metadata file.
         #[arg(value_parser = tilde_pathbuf, value_hint = ValueHint::AnyPath)]
