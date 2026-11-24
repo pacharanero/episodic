@@ -9,6 +9,25 @@ import { loadFingerprint, loadWorkspace, thumbnailPath, type Entry, type Workspa
 import { AuthImage, IconLink, MilestoneStrip, milestoneSummary } from './components';
 import { EpisodeView } from './episode';
 
+/**
+ * Any render failure shows what went wrong and how to recover, rather than
+ * unmounting the whole page and leaving it blank.
+ */
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <main id="main" className="crashed">
+      <Alert color="red" title="The workbench could not display this view" role="alert">
+        <p>{this.state.error.message}</p>
+        <p>Reload the page. If it happens again, stop the eps gui server and start it again with <code>s/gui-dev</code>. Your episode files have not been changed.</p>
+        <Button variant="default" onClick={() => location.reload()}>Reload</Button>
+      </Alert>
+    </main>;
+  }
+}
+
 /** How often the page asks whether any episode file changed. */
 const WATCH_INTERVAL_MS = 5000;
 
@@ -123,4 +142,4 @@ function EpisodeCard({ item, open }: { item: Entry; open: () => void }) {
   </article>;
 }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><MantineProvider theme={theme}><App /></MantineProvider></React.StrictMode>);
+createRoot(document.getElementById('root')!).render(<React.StrictMode><MantineProvider theme={theme}><ErrorBoundary><App /></ErrorBoundary></MantineProvider></React.StrictMode>);

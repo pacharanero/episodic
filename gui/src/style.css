@@ -115,3 +115,4 @@ footer { display: flex; justify-content: space-between; gap: 8px 24px; flex-wrap
 @media (max-width: 560px) { .milestone-list li { grid-template-columns: 14px minmax(0, 1fr) auto; } .milestone-detail { grid-column: 2 / -1; } }
 @media (max-width: 560px) { .board { grid-template-columns: 1fr; } main, header { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+.crashed { max-width: 720px; }

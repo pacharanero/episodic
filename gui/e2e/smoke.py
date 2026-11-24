@@ -184,10 +184,26 @@ max_characters = 300
             page.get_by_role("alert").wait_for()
             page.screenshot(path=str(CAPTURES / "error.png"), full_page=True)
             page.unroute("**/api/workspace")
-            page.route("**/api/workspace", lambda route: route.fulfill(content_type="application/json", body=json.dumps({"channel": {"name": "Empty channel", "id": "empty"}, "channel_links": [], "models": [], "episodes": [], "stages": [], "fingerprint": current_fingerprint()})))
+            page.route("**/api/workspace", lambda route: route.fulfill(content_type="application/json", body=json.dumps({"api_version": 2, "channel": {"name": "Empty channel", "id": "empty"}, "channel_links": [], "models": [], "episodes": [], "stages": [], "fingerprint": current_fingerprint()})))
             page.get_by_role("button", name="Refresh", exact=True).click()
             page.get_by_text("No episode folders found.", exact=False).wait_for()
             page.screenshot(path=str(CAPTURES / "empty.png"), full_page=True)
+
+            # A page and server from different builds must say so, not blank.
+            page.unroute("**/api/workspace")
+            page.route("**/api/workspace", lambda route: route.fulfill(content_type="application/json", body=json.dumps({"channel": {"name": "Old", "id": "old"}, "models": [], "episodes": [], "stages": []})))
+            page.get_by_role("button", name="Refresh", exact=True).click()
+            page.get_by_text("come from different builds", exact=False).wait_for()
+            # Any render failure lands on the error boundary, with a way out.
+            page.unroute("**/api/workspace")
+            broken = {"api_version": 2, "channel": {"name": "Broken", "id": "b"}, "channel_links": [], "models": [], "stages": ["in-planning"], "fingerprint": current_fingerprint(),
+                      "episodes": [{"entry": {"base": "2026.01.01-x", "path": "/x", "stage": "in-planning", "date": "2026-01-01"}, "report": None, "error": None, "frames": [], "thumbnail": None}]}
+            page.route("**/api/workspace", lambda route: route.fulfill(content_type="application/json", body=json.dumps(broken)))
+            page.get_by_role("button", name="Refresh", exact=True).click()
+            page.get_by_text("could not display this view", exact=False).wait_for()
+            assert page.get_by_role("button", name="Reload").is_visible()
+            page.screenshot(path=str(CAPTURES / "crashed.png"))
+            errors[:] = [error for error in errors if "reading 'youtube'" not in error]
             assert not errors, errors
             browser.close()
         print("Browser smoke passed; screenshots saved under .private/gui-captures/")

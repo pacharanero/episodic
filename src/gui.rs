@@ -27,7 +27,7 @@ use std::{
     fs,
     hash::{Hash, Hasher},
     io::Read,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Arc,
     time::UNIX_EPOCH,
 };
@@ -37,6 +37,13 @@ use tokio::sync::Semaphore;
 const FRAME_LIMIT: usize = 48;
 const IMAGE_LIMIT: u64 = 16 * 1024 * 1024;
 const TEXT_LIMIT: u64 = 256 * 1024;
+/// Upper bound on the frontend loaded into memory at startup.
+const FRONTEND_LIMIT: u64 = 32 * 1024 * 1024;
+
+/// The shape of `/api/workspace`. The page checks it, so a page from one
+/// build talking to a server from another says so instead of failing to
+/// render. Increase it whenever a field the page relies on changes.
+pub const API_VERSION: u32 = 2;
 
 /// Text artefacts that can be previewed, by kind and file suffix.
 const PREVIEWS: &[(&str, &str)] = &[
@@ -52,7 +59,7 @@ const PREVIEWS: &[(&str, &str)] = &[
 #[derive(Clone)]
 struct Server {
     config: PathBuf,
-    assets: PathBuf,
+    frontend: Arc<Frontend>,
     authority: String,
     token: String,
     /// Workspace scans: refused rather than queued when busy.
@@ -64,12 +71,9 @@ struct Server {
 pub fn run(config: Option<PathBuf>, assets: PathBuf, port: u16, dry_run: bool) -> Result<()> {
     let config = channel::resolve_path(config.as_deref())?;
     channel::load(&config)?;
-    let assets = assets
-        .canonicalize()
-        .context("frontend directory not found; run npm ci && npm run build in gui/")?;
-    if !assets.join("index.html").is_file() {
-        bail!("frontend index.html not found; run npm run build in gui/");
-    }
+    // Loaded once: a server always serves the page it was started with, even
+    // if gui/dist is rebuilt while it runs.
+    let frontend = Arc::new(Frontend::load(&assets)?);
     if dry_run {
         eprintln!("Would serve a read-only workbench on 127.0.0.1:{port}");
         return Ok(());
@@ -80,7 +84,7 @@ pub fn run(config: Option<PathBuf>, assets: PathBuf, port: u16, dry_run: bool) -
         let token = uuid::Uuid::new_v4().simple().to_string();
         let state = Server {
             config,
-            assets,
+            frontend,
             authority: authority.clone(),
             token: token.clone(),
             reads: Arc::new(Semaphore::new(3)),
@@ -102,6 +106,7 @@ fn router(state: Server) -> Router {
         .route("/api/episodes/{base}/artefacts/{kind}", get(preview))
         .route("/", get(index))
         .route("/assets/{*path}", get(asset))
+        .route("/favicon.ico", get(|| async { StatusCode::NO_CONTENT }))
         .layer(middleware::from_fn_with_state(state.clone(), protect))
         .with_state(state)
 }
@@ -140,40 +145,75 @@ async fn protect(State(state): State<Server>, request: Request<Body>, next: Next
 }
 
 async fn index(State(state): State<Server>) -> Response {
-    serve_asset(&state.assets, Path::new("index.html")).await
+    state.frontend.response("index.html")
 }
 
 async fn asset(State(state): State<Server>, WebPath(path): WebPath<String>) -> Response {
-    serve_asset(&state.assets, &Path::new("assets").join(path)).await
+    state.frontend.response(&format!("assets/{path}"))
 }
 
-async fn serve_asset(root: &Path, path: &Path) -> Response {
-    if path
-        .components()
-        .any(|part| !matches!(part, Component::Normal(_)))
-    {
-        return StatusCode::NOT_FOUND.into_response();
+/// The built frontend, held in memory: `index.html` and the HTML, JavaScript
+/// and CSS directly under `assets/`. Nothing else in the directory is served.
+struct Frontend {
+    files: std::collections::HashMap<String, (&'static str, Vec<u8>)>,
+}
+
+impl Frontend {
+    fn load(directory: &Path) -> Result<Self> {
+        let directory = directory
+            .canonicalize()
+            .context("frontend directory not found; run npm ci && npm run build in gui/")?;
+        let index = directory.join("index.html");
+        if !index.is_file() {
+            bail!("frontend index.html not found; run npm run build in gui/");
+        }
+        let mut candidates = vec![("index.html".to_owned(), index)];
+        if let Ok(entries) = fs::read_dir(directory.join("assets")) {
+            for entry in entries.filter_map(|entry| entry.ok()) {
+                if let Ok(name) = entry.file_name().into_string() {
+                    candidates.push((format!("assets/{name}"), entry.path()));
+                }
+            }
+        }
+        let mut files = std::collections::HashMap::new();
+        let mut total = 0;
+        for (key, path) in candidates {
+            let content_type = match path.extension().and_then(|extension| extension.to_str()) {
+                Some("html") => "text/html; charset=utf-8",
+                Some("js") => "text/javascript; charset=utf-8",
+                Some("css") => "text/css; charset=utf-8",
+                _ => continue,
+            };
+            // Symlinks out of the frontend directory are not followed.
+            let path = path.canonicalize()?;
+            if !path.starts_with(&directory) || !path.is_file() {
+                continue;
+            }
+            total += fs::metadata(&path)?.len();
+            if total > FRONTEND_LIMIT {
+                bail!(
+                    "frontend in {} is larger than expected",
+                    directory.display()
+                );
+            }
+            files.insert(key, (content_type, fs::read(&path)?));
+        }
+        Ok(Self { files })
     }
-    let Ok(file) = root.join(path).canonicalize() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    if !file.starts_with(root) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let content_type = match file.extension().and_then(|s| s.to_str()) {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        _ => return StatusCode::NOT_FOUND.into_response(),
-    };
-    match tokio::fs::read(file).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+
+    fn response(&self, key: &str) -> Response {
+        match self.files.get(key) {
+            Some((content_type, bytes)) => {
+                ([(header::CONTENT_TYPE, *content_type)], bytes.clone()).into_response()
+            }
+            None => StatusCode::NOT_FOUND.into_response(),
+        }
     }
 }
 
 #[derive(Serialize)]
 struct Workspace {
+    api_version: u32,
     channel: channel::ChannelIdentity,
     channel_links: Vec<links::Link>,
     stages: &'static [&'static str],
@@ -434,6 +474,7 @@ fn read_workspace(config_path: &Path) -> Result<Workspace> {
         }
     }
     Ok(Workspace {
+        api_version: API_VERSION,
         channel: config.channel,
         channel_links,
         stages: lifecycle::STAGES,
@@ -510,7 +551,9 @@ mod tests {
     fn access_requires_exact_host_origin_and_api_token() {
         let server = Server {
             config: PathBuf::new(),
-            assets: PathBuf::new(),
+            frontend: Arc::new(Frontend {
+                files: Default::default(),
+            }),
             authority: "127.0.0.1:1234".into(),
             token: "secret".into(),
             reads: Arc::new(Semaphore::new(2)),

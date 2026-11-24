@@ -47,7 +47,11 @@ export interface Entry {
   thumbnail: string | null;
 }
 
+/** Must match `API_VERSION` in src/gui.rs. */
+export const API_VERSION = 2;
+
 export interface Workspace {
+  api_version: number;
   channel: { name: string; id: string };
   channel_links: Link[];
   stages: string[];
@@ -80,7 +84,11 @@ async function authorised(path: string, signal?: AbortSignal): Promise<Response>
 export async function loadWorkspace(signal: AbortSignal): Promise<Workspace> {
   const response = await authorised('/api/workspace', signal);
   if (!response.ok) throw new Error('Could not read workspace. Check the server and configuration, then refresh.');
-  return response.json() as Promise<Workspace>;
+  const data = (await response.json()) as Partial<Workspace>;
+  if (data.api_version !== API_VERSION) {
+    throw new Error('This page and the running eps gui server come from different builds. Reload the page; if that does not help, stop the server and start it again with s/gui-dev.');
+  }
+  return data as Workspace;
 }
 
 /** A cheap marker that changes when episode files change; null when unavailable. */

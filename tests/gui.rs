@@ -109,13 +109,29 @@ fn gui_serves_only_authenticated_read_only_workspace_data() {
             .status(),
         404
     );
+    assert_eq!(value["api_version"], 2);
+    // A rebuild of the frontend while the server runs must not reach it: a
+    // page newer than its server is what blanked the workbench.
+    std::fs::write(assets.join("assets/app.js"), "console.log('rebuilt');").unwrap();
+    std::fs::write(assets.join("assets/new.js"), "console.log('new');").unwrap();
+    let served = client.get(format!("{base}assets/app.js")).send().unwrap();
+    assert_eq!(served.status(), 200);
+    assert_eq!(served.text().unwrap(), "console.log('fixture');");
     assert_eq!(
         client
-            .get(format!("{base}assets/app.js"))
+            .get(format!("{base}assets/new.js"))
             .send()
             .unwrap()
             .status(),
-        200
+        404
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}favicon.ico"))
+            .send()
+            .unwrap()
+            .status(),
+        204
     );
     assert_eq!(
         client
